@@ -8,7 +8,10 @@ export interface QuestionSelection {
 }
 
 type BucketName = 'weak' | 'due' | 'new' | 'other';
+export type QuestionBucket = BucketName;
 type Buckets = Record<BucketName, HanziEntry[]>;
+const LOW_ACCURACY_MIN_ATTEMPTS = 3;
+const LOW_ACCURACY_THRESHOLD = 0.6;
 
 function shuffle<T>(items: readonly T[], next: () => number): T[] {
   const shuffled = [...items];
@@ -26,7 +29,10 @@ function targets(count: number): Record<Exclude<BucketName, 'other'>, number> {
 }
 
 function isWeak(record: MasteryRecord | undefined): boolean {
-  return Boolean(record && record.attempts > 0 && (record.correct < record.attempts || record.streak === 0));
+  if (!record || record.attempts < 1) return false;
+  const lowAccuracy = record.attempts >= LOW_ACCURACY_MIN_ATTEMPTS
+    && record.correct / record.attempts < LOW_ACCURACY_THRESHOLD;
+  return record.streak === 0 || lowAccuracy;
 }
 
 function isDue(record: MasteryRecord | undefined, now: number): boolean {
@@ -38,16 +44,21 @@ function isNew(record: MasteryRecord | undefined): boolean {
 }
 
 /**
- * Buckets are exclusive: weak wins over due, due wins over new, and any
- * remaining selected-level term is a fallback item for deterministic filling.
+ * Weakness uses current evidence: a current miss (`streak === 0`) or fewer
+ * than 60% correct after at least three attempts. Historical misses alone do
+ * not keep a recovered term weak forever. Buckets are exclusive: weak wins
+ * over due, due wins over new, and remaining terms are mature fallback items.
  */
+export function classifyQuestionBucket(record: MasteryRecord | undefined, now: number): QuestionBucket {
+  if (isWeak(record)) return 'weak';
+  if (isDue(record, now)) return 'due';
+  if (isNew(record)) return 'new';
+  return 'other';
+}
+
 function classify(entries: readonly HanziEntry[], mastery: Record<string, MasteryRecord>, now: number): Buckets {
   return entries.reduce<Buckets>((buckets, entry) => {
-    const record = mastery[entry.id];
-    if (isWeak(record)) buckets.weak.push(entry);
-    else if (isDue(record, now)) buckets.due.push(entry);
-    else if (isNew(record)) buckets.new.push(entry);
-    else buckets.other.push(entry);
+    buckets[classifyQuestionBucket(mastery[entry.id], now)].push(entry);
     return buckets;
   }, { weak: [], due: [], new: [], other: [] });
 }

@@ -48,6 +48,7 @@ export function answerCurrent(run: RunState, selectedId: string, correctId: stri
 
   const questionId = run.questionIds[run.questionIndex];
   if (!questionId) throw new Error('Run has no active question');
+  if (correctId !== questionId) return run;
 
   const correct = selectedId === correctId;
   const questionIndex = run.questionIndex + 1;

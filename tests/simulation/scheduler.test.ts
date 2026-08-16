@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HanziEntry } from '../../src/content/types';
 import type { MasteryRecord } from '../../src/simulation/types';
-import { selectQuestionIds } from '../../src/simulation/scheduler';
+import { classifyQuestionBucket, selectQuestionIds } from '../../src/simulation/scheduler';
 
 function entries(count: number): HanziEntry[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -26,6 +26,12 @@ function record(overrides: Partial<MasteryRecord> = {}): MasteryRecord {
 }
 
 describe('selectQuestionIds', () => {
+  it('uses current weakness rather than permanent historical mistakes', () => {
+    expect(classifyQuestionBucket(record({ attempts: 100, correct: 99, streak: 12 }), 1_700_000_000_000)).toBe('other');
+    expect(classifyQuestionBucket(record({ attempts: 100, correct: 99, streak: 0 }), 1_700_000_000_000)).toBe('weak');
+    expect(classifyQuestionBucket(record({ attempts: 5, correct: 2, streak: 2 }), 1_700_000_000_000)).toBe('weak');
+  });
+
   it('returns a deterministic, unique 50/30/20 selection', () => {
     const all = entries(30);
     const mastery = Object.fromEntries([

@@ -84,4 +84,8 @@ describe('run reducers', () => {
     expect(answerCurrent(paused, 'a', 'a')).toBe(paused);
     expect(moveLane(complete, -1)).toBe(complete);
   });
+
+  it('leaves the run unchanged when a stale correct id does not match the active question', () => {
+    expect(answerCurrent(run, 'b', 'b')).toBe(run);
+  });
 });
