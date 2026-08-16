@@ -3,7 +3,8 @@
   "label": "HSK 3.0 · 2026",
   "source": {
     "url": "https://hsk.cn-bj.ufileos.com/3.0/%E6%96%B0%E7%89%88HSK%E8%80%83%E8%AF%95%E5%A4%A7%E7%BA%B21219.pdf",
-    "sha256": "ec74ce0439e837bbb15154be13e747ae798903b2fd3a331629df6c3b45504941"
+    "sha256": "ec74ce0439e837bbb15154be13e747ae798903b2fd3a331629df6c3b45504941",
+    "snapshotSha256": "90df69f473e21279fdfce1206e9b962fe4d7dbd918ee818ea55fecabdc09d27f"
   },
   "importerVersion": "1",
   "draftGenerator": "ollama:qwen3.5:9b",

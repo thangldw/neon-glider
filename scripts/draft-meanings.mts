@@ -119,9 +119,9 @@ async function generateSingle(term: SourceTerm, format: object | undefined): Pro
   if (!response.ok) throw new HttpResponseError(response.status);
   const body = await response.json() as { response?: unknown };
   if (typeof body.response !== 'string') throw new SemanticResponseError('Ollama response has no generated text');
-  if (!format) return parsePlainMeaning(body.response);
+  if (!format) return parsePlainMeaning(body.response, term);
   try {
-    return parseSingleMeaning(JSON.parse(body.response));
+    return parseSingleMeaning(JSON.parse(body.response), term);
   } catch (error) {
     if (error instanceof SemanticResponseError) throw error;
     throw new SemanticResponseError('Ollama response is not valid JSON');

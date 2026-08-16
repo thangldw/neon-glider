@@ -1,14 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { rebuildContent, PINNED_SYLLABUS_SHA256 } from './build-content.mts';
+import { rebuildContent } from './build-content.mts';
+import { assertPinnedSourceSnapshot } from './provenance.mts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
 async function verifyContent(): Promise<void> {
+  assertPinnedSourceSnapshot(await readFile(resolve(ROOT, 'content/source/hsk3-2026.json')));
   const build = await rebuildContent();
-  if (build.manifest.source.sha256 !== PINNED_SYLLABUS_SHA256) {
-    throw new Error(`Pinned syllabus hash mismatch: ${build.manifest.source.sha256}`);
-  }
   for (const [level, count] of Object.entries(build.manifest.entryCountsByLevel)) {
     if (count === 0) throw new Error(`HSK level ${level} is empty`);
   }

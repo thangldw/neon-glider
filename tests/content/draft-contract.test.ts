@@ -3,8 +3,10 @@ import {
   attachOrderedMeanings,
   createOrderedResponseSchema,
   createSingleMeaningSchema,
+  createVietnameseRepairSchema,
   parsePlainMeaning,
   parseSingleMeaning,
+  partitionVietnameseRepairMeanings,
 } from '../../scripts/draft-contract.mts';
 
 describe('attachOrderedMeanings', () => {
@@ -23,6 +25,11 @@ describe('attachOrderedMeanings', () => {
   it('rejects a response whose length does not match the request', () => {
     expect(() => attachOrderedMeanings({ meanings: [['yêu']] }, requested))
       .toThrow('Ollama response length does not match requested terms');
+  });
+
+  it('rejects Han and English meanings returned by the model', () => {
+    expect(() => attachOrderedMeanings({ meanings: [['爱'], ['six']] }, requested))
+      .toThrow('Ollama response has invalid Vietnamese meanings for hsk3-l1-0001');
   });
 
   it('constrains a model response to exactly one bounded meanings array per request item', () => {
@@ -47,7 +54,7 @@ describe('attachOrderedMeanings', () => {
   });
 
   it('accepts one validated single-term fallback meaning', () => {
-    expect(parseSingleMeaning({ meaning: 'vững chắc' })).toBe('vững chắc');
+    expect(parseSingleMeaning({ meaning: 'vững chắc' }, requested[0]!)).toBe('vững chắc');
     expect(createSingleMeaningSchema()).toMatchObject({
       type: 'object',
       required: ['meaning'],
@@ -57,6 +64,27 @@ describe('attachOrderedMeanings', () => {
   });
 
   it('sanitizes a bounded plain-text fallback meaning', () => {
-    expect(parsePlainMeaning('  "vững chắc"  ')).toBe('vững chắc');
+    expect(parsePlainMeaning('  "vững chắc"  ', requested[0]!)).toBe('vững chắc');
+  });
+
+  it('constrains repair batches to a flat, exact-length meanings array', () => {
+    expect(createVietnameseRepairSchema(2)).toMatchObject({
+      type: 'object',
+      required: ['meanings'],
+      properties: {
+        meanings: {
+          minItems: 2,
+          maxItems: 2,
+          items: { type: 'string', minLength: 1, pattern: expect.stringContaining('\\u4e00') },
+        },
+      },
+    });
+  });
+
+  it('keeps valid repair positions and requeues invalid positions', () => {
+    expect(partitionVietnameseRepairMeanings({ meanings: ['mặc', 'six'] }, requested)).toEqual({
+      accepted: { 'hsk3-l1-0001': 'mặc' },
+      rejected: [requested[1]],
+    });
   });
 });

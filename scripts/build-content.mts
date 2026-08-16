@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { parse } from 'csv-parse/sync';
 import type { HanziEntry, SourceSnapshot } from '../src/content/types';
 import { validateEntries } from '../src/content/validate';
+import { sourceSnapshotSha256 } from './provenance.mts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SOURCE_PATH = resolve(ROOT, 'content/source/hsk3-2026.json');
@@ -28,6 +29,7 @@ export interface ContentManifest {
   source: {
     url: string;
     sha256: string;
+    snapshotSha256: string;
   };
   importerVersion: string;
   draftGenerator: string;
@@ -56,8 +58,11 @@ function assertReviewDate(value: string, id: string): void {
   }
 }
 
-function parseReviewCsv(raw: string): ReviewRow[] {
-  if (!raw.startsWith('id,meaningsVi,reviewedBy,reviewedAt\n')) {
+export function parseReviewCsv(raw: string): ReviewRow[] {
+  const normalized = raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
+  const lineEnd = normalized.indexOf('\n');
+  const header = (lineEnd === -1 ? normalized : normalized.slice(0, lineEnd)).replace(/\r$/, '');
+  if (header !== 'id,meaningsVi,reviewedBy,reviewedAt') {
     throw new Error('Review CSV header must be id,meaningsVi,reviewedBy,reviewedAt');
   }
 
@@ -145,11 +150,18 @@ export async function rebuildContent(): Promise<ContentBuild> {
   const manifest: ContentManifest = {
     datasetVersion: source.datasetVersion,
     label: source.label,
-    source: { url: source.syllabusUrl, sha256: source.syllabusSha256 },
+    source: {
+      url: source.syllabusUrl,
+      sha256: source.syllabusSha256,
+      snapshotSha256: sourceSnapshotSha256(Buffer.from(sourceRaw)),
+    },
     importerVersion: IMPORTER_VERSION,
     draftGenerator: DRAFT_GENERATOR,
     reviewDateRange: reviewDates.length
-      ? { from: reviewDates.toSorted()[0]!, to: reviewDates.toSorted().at(-1)! }
+      ? (() => {
+        const sortedReviewDates = [...reviewDates].sort();
+        return { from: sortedReviewDates[0]!, to: sortedReviewDates.at(-1)! };
+      })()
       : null,
     entryCountsByLevel,
     reviewedCount,
