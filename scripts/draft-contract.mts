@@ -53,7 +53,7 @@ export function createVietnameseRepairSchema(count: number): object {
         items: {
           type: 'string',
           minLength: 1,
-          pattern: '^[^|\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af]+$',
+          pattern: '^[^/|\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af]+$',
         },
       },
     },

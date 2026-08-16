@@ -11,6 +11,7 @@ import {
   SemanticResponseError,
 } from './draft-contract.mts';
 import { postOllamaStream } from './ollama-transport.mts';
+import { sanitizeRepairCheckpoint, type RepairCheckpoint } from './repair-checkpoint.mts';
 import { runRepairRound } from './repair-scheduler.mts';
 import { parseReviewCsv } from './build-content.mts';
 
@@ -25,11 +26,7 @@ const REQUEST_INACTIVITY_TIMEOUT_MS = Number(process.env.HANZI_REPAIR_TIMEOUT_MS
 const REQUEST_HARD_TIMEOUT_MS = 180_000;
 const SINGLE_INACTIVITY_TIMEOUT_MS = 10_000;
 const SINGLE_HARD_TIMEOUT_MS = 60_000;
-
-interface RepairCheckpoint {
-  model: `ollama:${string}`;
-  meanings: Record<string, string>;
-}
+const REPAIR_EXAMPLES = '能→có thể; 卡→thẻ; 可能→có khả năng; 满意→hài lòng; 能够→có thể; 全体→toàn thể; 什么样→loại nào; 体育→thể thao; 体育场→sân vận động; 外地→ngoại tỉnh; 信用卡→thẻ tín dụng; 银行卡→thẻ ngân hàng; 怎么样→như thế nào; 怎样→như thế nào; 只能→chỉ có thể; 福→phúc lành; 行→ngành nghề; 集体→tập thể; 具体→cụ thể; 世纪→thế kỷ; 世界→thế giới; 世界杯→giải vô địch thế giới; 幸运→may mắn; 优势→ưu thế; 整体→toàn thể; 制度→chế độ; 专门→chuyên môn; 作者→tác giả';
 
 function csvCell(value: string): string {
   return /[",\n\r]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
@@ -42,16 +39,12 @@ function cleanMeanings(raw: string, term: SourceTerm): string[] {
 async function readCheckpoint(sourceById: Map<string, SourceTerm>): Promise<RepairCheckpoint> {
   try {
     const checkpoint = JSON.parse(await readFile(CHECKPOINT_PATH, 'utf8')) as RepairCheckpoint;
-    if (checkpoint.model !== `ollama:${MODEL}` || !checkpoint.meanings || typeof checkpoint.meanings !== 'object') {
-      throw new Error('Repair checkpoint has an invalid model or structure');
+    const sanitized = sanitizeRepairCheckpoint(checkpoint, `ollama:${MODEL}`, sourceById, isVietnameseDraftMeaning);
+    if (sanitized.droppedIds.length) {
+      await saveCheckpoint(sanitized.checkpoint);
+      console.warn(`Dropped ${sanitized.droppedIds.length} invalid repair checkpoint rows.`);
     }
-    for (const [id, meaning] of Object.entries(checkpoint.meanings)) {
-      const term = sourceById.get(id);
-      if (!term || typeof meaning !== 'string' || !isVietnameseDraftMeaning(meaning, term)) {
-        throw new Error(`Repair checkpoint has invalid translation: ${id}`);
-      }
-    }
-    return checkpoint;
+    return sanitized.checkpoint;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { model: `ollama:${MODEL}`, meanings: {} };
     throw error;
@@ -74,13 +67,14 @@ async function translateBatch(
       stream: true,
       think: false,
       format: createVietnameseRepairSchema(terms.length),
-      options: { temperature: 0, num_predict: Math.max(128, terms.length * 32) },
+      options: { temperature: 0, num_predict: Math.max(256, terms.length * 32) },
       messages: [{
         role: 'user',
         content: [
           'For every ordered Chinese term, return exactly one concise Vietnamese dictionary meaning.',
-          'Vietnamese only: every meaning must contain at least one Vietnamese diacritic except a natural ASCII word such as hai; do not output Chinese, Japanese, Korean, English, pinyin, IDs, explanations, or pipe characters.',
+          'Vietnamese only: every meaning must contain at least one Vietnamese diacritic except a natural ASCII word such as hai; do not output Chinese, Japanese, Korean, English, pinyin, IDs, explanations, slash, or pipe characters.',
           'Examples: 房间→căn phòng; 放→đặt xuống; 飞→bay lượn; 高→ở trên; 给→đưa cho; 跟→cùng với; 网站→trang mạng; 二→hai.',
+          REPAIR_EXAMPLES,
           ...(strongerPrompt ? ['Every item must be one plain Vietnamese string in the flat meanings array; never emit nested arrays or prose.'] : []),
           'Return only JSON object {"meanings":["..."]} in the same order.',
           JSON.stringify(terms.map(({ term, pinyin }) => [term, pinyin])),
@@ -102,10 +96,10 @@ async function generateSingle(term: SourceTerm, format: object | undefined): Pro
       stream: true,
       think: false,
       format,
-      options: { temperature: 0, num_predict: 64 },
+      options: { temperature: 0, num_predict: 256 },
       prompt: format
-        ? `Return only JSON {"meaning":"..."} with one concise Vietnamese dictionary meaning containing Vietnamese diacritics for ${term.term} (${term.pinyin}). Examples: 高→ở trên; 后→phía sau; 花→bông hoa; 考→thi cử; 课→bài học; 里→ở trong; 玩儿→vui chơi; 我→bản thân; 给→đưa cho; 跟→cùng với; 网站→trang mạng; 二→hai. Every meaning needs a Vietnamese diacritic unless naturally hai; use a short natural phrase if needed. No Chinese, English, pinyin, or labels.`
-        : `Return one concise Vietnamese dictionary meaning containing a Vietnamese diacritic only for ${term.term} (${term.pinyin}). Examples: 后→phía sau; 花→bông hoa; 考→thi cử; 课→bài học; 里→ở trong; 玩儿→vui chơi; 我→bản thân; 高→ở trên; 给→đưa cho; 跟→cùng với; 网站→trang mạng; 二→hai. No Chinese, English, pinyin, labels, or punctuation.`,
+        ? `Return only JSON {"meaning":"..."} with one concise Vietnamese dictionary meaning containing Vietnamese diacritics for ${term.term} (${term.pinyin}). No Chinese, English, pinyin, slash, pipe, labels, or explanation.`
+        : `Return one concise Vietnamese dictionary meaning containing a Vietnamese diacritic only for ${term.term} (${term.pinyin}). No Chinese, English, pinyin, slash, pipe, labels, or explanation.`,
     }, SINGLE_INACTIVITY_TIMEOUT_MS, SINGLE_HARD_TIMEOUT_MS);
   if (!format) return parsePlainMeaning(content, term);
   try {
@@ -156,7 +150,8 @@ async function repairDrafts(): Promise<void> {
       checkpoint.meanings[id] = meaning;
     }
     await saveCheckpoint(checkpoint);
-    console.log(`Repaired ${Object.keys(checkpoint.meanings).length}/${targets.length} rows.`);
+    const repairedTargetCount = targets.filter((term) => Object.hasOwn(checkpoint.meanings, term.id)).length;
+    console.log(`Repaired ${repairedTargetCount}/${targets.length} rows.`);
   };
 
   const defer = (error: unknown, terms: SourceTerm[]) => {
@@ -165,6 +160,15 @@ async function repairDrafts(): Promise<void> {
   const firstRound = await runRepairRound(pending, BATCH_SIZE, (terms) => translateBatch(terms), saveAccepted, defer);
   const secondRound = await runRepairRound(firstRound, 5, (terms) => translateBatch(terms, true), saveAccepted, defer);
   for (const term of secondRound) {
+    try {
+      const singleBatch = await translateBatch([term], true);
+      if (singleBatch.accepted[term.id]) {
+        await saveAccepted(singleBatch.accepted);
+        continue;
+      }
+    } catch (error) {
+      console.warn(`Deferring repair singleton: ${error instanceof Error ? error.name : typeof error}`);
+    }
     await saveAccepted({ [term.id]: await repairSingleFallback(term) });
   }
   if (targets.some((term) => !Object.hasOwn(checkpoint.meanings, term.id))) {

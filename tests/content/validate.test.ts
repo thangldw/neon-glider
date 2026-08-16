@@ -18,11 +18,24 @@ describe('validateEntries', () => {
       { id: 'english', term: '六', pinyin: 'liù', level: 1, sourceOrder: 3, meaningsVi: ['six'] },
       { id: 'ascii-vi', term: '二', pinyin: 'èr', level: 1, sourceOrder: 4, meaningsVi: ['hai'] },
       { id: 'valid', term: '穿', pinyin: 'chuān', level: 1, sourceOrder: 5, meaningsVi: ['mặc'] },
+      { id: 'accented-vi', term: '能', pinyin: 'néng', level: 1, sourceOrder: 6, meaningsVi: ['có thể'] },
     ]);
     expect(errors).toContain('han: meaningsVi must use Vietnamese draft syntax');
     expect(errors).toContain('echo: meaningsVi must use Vietnamese draft syntax');
     expect(errors).toContain('english: meaningsVi must use Vietnamese draft syntax');
     expect(errors).not.toContain('ascii-vi: meaningsVi must use Vietnamese draft syntax');
     expect(errors).not.toContain('valid: meaningsVi must use Vietnamese draft syntax');
+    expect(errors).not.toContain('accented-vi: meaningsVi must use Vietnamese draft syntax');
+  });
+
+  it('rejects mixed English and embedded pinyin in Vietnamese-looking drafts', () => {
+    const errors = validateEntries([
+      { id: 'mixed-slash', term: '妇女', pinyin: 'fùnǚ', level: 1, sourceOrder: 1, meaningsVi: ['phụ nữ/woman (thường chỉ người trưởng thành)'] },
+      { id: 'mixed-word', term: '妇女', pinyin: 'fùnǚ', level: 1, sourceOrder: 2, meaningsVi: ['người woman'] },
+      { id: 'embedded-pinyin', term: '爱好', pinyin: 'àihào', level: 1, sourceOrder: 3, meaningsVi: ['người aihao'] },
+    ]);
+    expect(errors).toContain('mixed-slash: meaningsVi must use Vietnamese draft syntax');
+    expect(errors).toContain('mixed-word: meaningsVi must use Vietnamese draft syntax');
+    expect(errors).toContain('embedded-pinyin: meaningsVi must use Vietnamese draft syntax');
   });
 });

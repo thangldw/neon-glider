@@ -68,7 +68,8 @@ describe('attachOrderedMeanings', () => {
   });
 
   it('constrains repair batches to a flat, exact-length meanings array', () => {
-    expect(createVietnameseRepairSchema(2)).toMatchObject({
+    const schema = createVietnameseRepairSchema(2);
+    expect(schema).toMatchObject({
       type: 'object',
       required: ['meanings'],
       properties: {
@@ -79,6 +80,7 @@ describe('attachOrderedMeanings', () => {
         },
       },
     });
+    expect(JSON.stringify(schema)).toContain('^[^/|');
   });
 
   it('keeps valid repair positions and requeues invalid positions', () => {
