@@ -20,6 +20,7 @@
 - Reload resumes the active run behind a three-second countdown; a new page session without compatible state starts a new run.
 - Use Three.js primitive geometry and DOM UI; do not add React, a physics engine, complex models, or heavy post-processing.
 - Vietnamese meanings must be human-reviewed before a level can be marked release-ready.
+- AI-generated Vietnamese meanings may be used for local development only; draft manifests must set `reviewStatus: "draft"`, `releaseReady: false`, and keep `content:verify` plus deployment blocked.
 - Manual deployment only: `npm test` followed by `npm run deploy`; do not add GitHub Actions.
 
 ---
@@ -36,6 +37,7 @@ vitest.config.ts                    unit/integration test configuration
 playwright.config.ts                browser test configuration
 README.md                           local run, content refresh, and manual deploy
 scripts/fetch-hsk3.mts              official-source snapshot fetcher
+scripts/draft-meanings.mts          resumable local Ollama draft generator
 scripts/build-content.mts           reviewed translation merger and manifest builder
 scripts/verify-content.mts          release content gate
 content/source/hsk3-2026.json normalized official source snapshot
@@ -384,7 +386,9 @@ git commit -m "feat: ingest official HSK 3.0 vocabulary"
 ### Task 3: Reviewed Vietnamese Content Pack and Release Gate
 
 **Files:**
+- Modify: `package.json`
 - Create: `content/review/hsk3-2026.vi.csv`
+- Create: `scripts/draft-meanings.mts`
 - Create: `src/content/validate.ts`
 - Create: `scripts/build-content.mts`
 - Create: `scripts/verify-content.mts`
@@ -405,6 +409,10 @@ id,meaningsVi,reviewedBy,reviewedAt
 ```
 
 Add one row for every source term. `meaningsVi` uses `|` between distinct Vietnamese senses. `reviewedBy` is the human reviewer's name or team identifier; `reviewedAt` is ISO `YYYY-MM-DD`. A row without both review fields is draft content and must fail the release gate.
+
+Generate the initial draft locally with the installed Ollama model `qwen3.5:9b`. Add `scripts/draft-meanings.mts` to batch source terms, request concise Vietnamese dictionary senses as structured JSON at temperature 0, validate that every requested ID returns exactly once, and resume from a checkpoint file. Record `draftGenerator: "ollama:qwen3.5:9b"`; do not populate `reviewedBy` or `reviewedAt` for AI output.
+
+Add `"content:draft": "tsx scripts/draft-meanings.mts"` to `package.json`.
 
 - [ ] **Step 2: Write failing validation tests**
 
@@ -454,11 +462,11 @@ export function validateEntries(entries: HanziEntry[]): string[] {
 
 1. Read `content/source/hsk3-2026.json`.
 2. Parse CSV with `parse` from `csv-parse/sync` using `{ columns: true, bom: true, skip_empty_lines: true }`; do not split raw lines on commas.
-3. Require exactly one review row per source ID.
-4. Require non-empty `reviewedBy` and valid `reviewedAt`.
+3. Require exactly one translation row per source ID.
+4. Accept blank `reviewedBy` and `reviewedAt` only as a draft pair; reject half-populated review metadata.
 5. Split `meaningsVi` on `|`, trim values, and call `validateEntries`.
 6. Sort by level then `sourceOrder`.
-7. Write `src/content/generated.json` and a manifest containing dataset version, label, source URL/hash, importer version, review date range, and entry counts by level.
+7. Write `src/content/generated.json` and a manifest containing dataset version, label, source URL/hash, importer version, draft generator, review date range, entry counts by level, `reviewedCount`, `draftCount`, `reviewStatus`, and `releaseReady`.
 
 Expose this loader for runtime code:
 
@@ -488,9 +496,9 @@ npm run content:build
 npm run content:verify
 ```
 
-Expected: PASS only after all HSK 1–3 Vietnamese meanings have a human reviewer and review date. Treat review completion as a release gate, not an automated quality claim.
+Expected during development: tests and `content:build` PASS, producing `reviewStatus: "draft"` and `releaseReady: false`; `content:verify` exits non-zero with the exact draft count. It may PASS only after all HSK 1–3 Vietnamese meanings have a human reviewer and review date. Treat review completion as a release gate, not an automated quality claim.
 
-- [ ] **Step 6: Commit reviewed content and pipeline**
+- [ ] **Step 6: Commit draft content and the review-gated pipeline**
 
 ```bash
 git add content/review src/content scripts/build-content.mts scripts/verify-content.mts tests/content/validate.test.ts

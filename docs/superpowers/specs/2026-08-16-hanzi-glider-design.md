@@ -39,7 +39,7 @@ interface HanziEntry {
 }
 ```
 
-The dataset manifest records `datasetVersion: "hsk3-2026-08-16"`, source URL, retrieval date, source hash, importer version, and entry counts by level. Vietnamese meanings require human review before release. Generated or inferred vocabulary must not be silently presented as authoritative HSK content.
+The dataset manifest records `datasetVersion: "hsk3-2026-08-16"`, source URL, retrieval date, source hash, importer version, entry counts by level, draft generator, reviewed count, draft count, and `releaseReady`. Vietnamese meanings require human review before release. AI-generated Vietnamese meanings may be used for local development only when the manifest sets `reviewStatus: "draft"` and `releaseReady: false`; the release verifier and deploy command must continue to fail until every entry is human-reviewed. Generated or inferred vocabulary must not be silently presented as authoritative HSK content.
 
 References:
 
