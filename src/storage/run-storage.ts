@@ -36,16 +36,32 @@ function isUint32(value: unknown): value is number {
   return isNonNegativeInteger(value) && value <= MAX_UINT32;
 }
 
-function isNonNegativeFinite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
-}
-
 function isAnswer(value: unknown, expectedQuestionId: string): value is AnswerRecord {
   if (!isRecord(value) || !hasExactKeys(value, ['questionId', 'selectedId', 'correct'])) return false;
   if (value.questionId !== expectedQuestionId || !isNonEmptyString(value.selectedId) || typeof value.correct !== 'boolean') {
     return false;
   }
   return value.correct ? value.selectedId === expectedQuestionId : value.selectedId !== expectedQuestionId;
+}
+
+function reconstructCounters(answers: unknown[], questionIds: unknown[]): { score: number; combo: number; energy: number } | null {
+  let score = 0;
+  let combo = 0;
+  let energy = 50;
+  for (let index = 0; index < answers.length; index += 1) {
+    const answer = answers[index];
+    const questionId = questionIds[index];
+    if (!isNonEmptyString(questionId) || !isAnswer(answer, questionId)) return null;
+    if (answer.correct) {
+      score += 100 + combo * 10;
+      combo += 1;
+      energy = Math.min(100, energy + 5);
+    } else {
+      combo = 0;
+      energy = Math.max(0, energy - 10);
+    }
+  }
+  return { score, combo, energy };
 }
 
 export function isRunState(value: unknown): value is RunState {
@@ -57,6 +73,7 @@ export function isRunState(value: unknown): value is RunState {
   if (!Array.isArray(value.questionIds) || !Array.isArray(value.answers)) return false;
   const questionIds = value.questionIds;
   const answers = value.answers;
+  const counters = reconstructCounters(answers, questionIds);
   if (value.schemaVersion !== 1 || value.datasetVersion !== DATASET_VERSION
     || !isUint32(value.seed) || !isUint32(value.rngState)
     || (value.level !== 1 && value.level !== 2 && value.level !== 3)
@@ -64,10 +81,10 @@ export function isRunState(value: unknown): value is RunState {
     || !questionIds.every(isNonEmptyString) || new Set(questionIds).size !== QUESTION_COUNT
     || !isNonNegativeInteger(value.questionIndex) || value.questionIndex > QUESTION_COUNT
     || (value.lane !== 0 && value.lane !== 1 && value.lane !== 2)
-    || !isNonNegativeFinite(value.score) || !isNonNegativeFinite(value.combo)
-    || !isNonNegativeFinite(value.energy) || value.energy > 100
+    || !isNonNegativeInteger(value.score) || !isNonNegativeInteger(value.combo)
+    || !isNonNegativeInteger(value.energy) || value.energy > 100
     || answers.length !== value.questionIndex
-    || !answers.every((answer, index) => isAnswer(answer, questionIds[index]))
+    || !counters || value.score !== counters.score || value.combo !== counters.combo || value.energy !== counters.energy
     || (value.status !== 'playing' && value.status !== 'paused' && value.status !== 'complete')) {
     return false;
   }

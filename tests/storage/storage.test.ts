@@ -102,6 +102,28 @@ describe('active run storage', () => {
     }
   });
 
+  it('restores only counters that can be reconstructed from the answer history', () => {
+    const answers = [
+      { questionId: 'q1', selectedId: 'q1', correct: true },
+      { questionId: 'q2', selectedId: 'q2', correct: true },
+      { questionId: 'q3', selectedId: 'distractor', correct: false },
+    ];
+    const valid = makeRun({ questionIndex: 3, answers, score: 210, combo: 0, energy: 50 });
+
+    sessionStorage.setItem(RUN_KEY, JSON.stringify(valid));
+    expect(loadRun(sessionStorage)).toEqual(valid);
+
+    for (const invalid of [
+      makeRun({ questionIndex: 3, answers, score: 211, combo: 0, energy: 50 }),
+      makeRun({ questionIndex: 3, answers, score: 210, combo: 0.5, energy: 50 }),
+      makeRun({ questionIndex: 3, answers, score: 210, combo: 0, energy: 49 }),
+    ]) {
+      sessionStorage.setItem(RUN_KEY, JSON.stringify(invalid));
+      expect(loadRun(sessionStorage)).toBeNull();
+      expect(sessionStorage.getItem(RUN_KEY)).toBeNull();
+    }
+  });
+
   it('falls back safely when session storage is unavailable and notifies once per failed operation', () => {
     const unavailable = vi.fn();
     const denied = new DeniedStorage();
@@ -156,6 +178,14 @@ describe('persistent progress storage', () => {
       makeProgress({ highScores: { 1: 0, 2: -1, 3: 0 } }),
       makeProgress({ volume: 1.1 }),
       makeProgress({ reducedMotion: 'false' as never }),
+      makeProgress({ mastery: { term: { attempts: 1, correct: 1, streak: 1, lastSeenAt: 1.5, nextReviewAt: 2 } } }),
+      makeProgress({ mastery: { term: {
+        attempts: 1,
+        correct: 1,
+        streak: 1,
+        lastSeenAt: Number.MAX_SAFE_INTEGER + 1,
+        nextReviewAt: Number.MAX_SAFE_INTEGER + 1,
+      } } }),
     ];
 
     for (const value of invalids) {
@@ -219,5 +249,31 @@ describe('mastery updates', () => {
     expect(updated.mastery.term).toEqual({ attempts: 5, correct: 4, streak: 0, lastSeenAt: now, nextReviewAt: now });
     expect(updated.mastery.untouched).toBe(progress.mastery.untouched);
     expect(progress.mastery.term).toEqual({ attempts: 4, correct: 4, streak: 4, lastSeenAt: 1, nextReviewAt: 2 });
+  });
+
+  it.each(['__proto__', 'constructor'])('treats reserved id %s as an unseen own mastery record', (termId) => {
+    const now = 1_700_000_000_000;
+    const progress = makeProgress();
+
+    const updated = updateMastery(progress, termId, true, now);
+    expect(Object.hasOwn(updated.mastery, termId)).toBe(true);
+    expect(updated.mastery[termId]).toEqual({
+      attempts: 1,
+      correct: 1,
+      streak: 1,
+      lastSeenAt: now,
+      nextReviewAt: now + 86_400_000,
+    });
+    expect(updated.mastery[termId].attempts).toBe(1);
+    expect(JSON.parse(JSON.stringify(updated))).toEqual(updated);
+    expect(progress.mastery).toEqual({});
+  });
+
+  it('rejects unsafe update timestamps and additions that cannot be represented safely', () => {
+    const progress = makeProgress();
+
+    expect(() => updateMastery(progress, 'term', true, 1.5)).toThrow(RangeError);
+    expect(() => updateMastery(progress, 'term', true, Number.MAX_SAFE_INTEGER)).toThrow(RangeError);
+    expect(() => updateMastery(progress, 'term', true, Number.MAX_SAFE_INTEGER - 1)).toThrow(RangeError);
   });
 });

@@ -4,6 +4,7 @@ const KEY = 'hanzi-glider.progress';
 const DATASET_VERSION = 'hsk3-2026-08-16';
 const DAY_MS = 86_400_000;
 const REVIEW_INTERVAL_DAYS = [0, 1, 3, 7, 14] as const;
+const MAX_REVIEW_DELAY_MS = REVIEW_INTERVAL_DAYS[REVIEW_INTERVAL_DAYS.length - 1] * DAY_MS;
 
 type UnavailableHandler = () => void;
 
@@ -28,10 +29,6 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isNonNegativeFinite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
-}
-
 function isTermId(value: string): boolean {
   return value.trim().length > 0;
 }
@@ -43,8 +40,8 @@ export function isMasteryRecord(value: unknown): value is MasteryRecord {
     && isNonNegativeInteger(value.streak)
     && value.correct <= value.attempts
     && value.streak <= value.correct
-    && isNonNegativeFinite(value.lastSeenAt)
-    && isNonNegativeFinite(value.nextReviewAt)
+    && isNonNegativeInteger(value.lastSeenAt)
+    && isNonNegativeInteger(value.nextReviewAt)
     && value.nextReviewAt >= value.lastSeenAt;
 }
 
@@ -80,7 +77,7 @@ export function createDefaultProgress(): ProgressState {
   return {
     schemaVersion: 1,
     datasetVersion: DATASET_VERSION,
-    mastery: {},
+    mastery: Object.create(null) as Record<string, MasteryRecord>,
     highScores: { 1: 0, 2: 0, 3: 0 },
     selectedLevel: 1,
     reducedMotion: false,
@@ -131,17 +128,24 @@ export function loadProgress(storage: Storage, onUnavailable: UnavailableHandler
 }
 
 export function updateMastery(progress: ProgressState, termId: string, correct: boolean, now: number): ProgressState {
+  if (!isProgressState(progress)) throw new TypeError('progress must be a compatible ProgressState');
   if (!isTermId(termId)) throw new Error('termId must be a non-empty string');
   if (typeof correct !== 'boolean') throw new Error('correct must be a boolean');
-  if (!isNonNegativeFinite(now)) throw new Error('now must be a finite non-negative timestamp');
+  if (!isNonNegativeInteger(now) || now > Number.MAX_SAFE_INTEGER - MAX_REVIEW_DELAY_MS) {
+    throw new RangeError('now must be a non-negative safe timestamp with room for review scheduling');
+  }
 
-  const previous = progress.mastery[termId] ?? {
+  const previous = Object.hasOwn(progress.mastery, termId) ? progress.mastery[termId] : {
     attempts: 0,
     correct: 0,
     streak: 0,
     lastSeenAt: now,
     nextReviewAt: now,
   };
+  if (previous.attempts === Number.MAX_SAFE_INTEGER
+    || (correct && (previous.correct === Number.MAX_SAFE_INTEGER || previous.streak === Number.MAX_SAFE_INTEGER))) {
+    throw new RangeError('mastery counters cannot exceed safe integer range');
+  }
   const streak = correct ? previous.streak + 1 : 0;
   const interval = REVIEW_INTERVAL_DAYS[Math.min(streak, REVIEW_INTERVAL_DAYS.length - 1)];
   const record: MasteryRecord = {
@@ -152,5 +156,8 @@ export function updateMastery(progress: ProgressState, termId: string, correct: 
     nextReviewAt: correct ? now + interval * DAY_MS : now,
   };
 
-  return { ...progress, mastery: { ...progress.mastery, [termId]: record } };
+  const mastery = Object.create(null) as Record<string, MasteryRecord>;
+  for (const [knownTermId, knownRecord] of Object.entries(progress.mastery)) mastery[knownTermId] = knownRecord;
+  mastery[termId] = record;
+  return { ...progress, mastery };
 }
