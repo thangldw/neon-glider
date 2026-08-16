@@ -8,6 +8,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "playwright test",
     "content:fetch": "tsx scripts/fetch-hsk3.mts",
     "content:draft": "tsx scripts/draft-meanings.mts",
     "content:repair": "tsx scripts/repair-vietnamese-drafts.mts",

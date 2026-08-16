@@ -40,6 +40,17 @@ it('renders only while active and releases its canvas resources on disposal', ()
   expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
 });
 
+it('reports renderer draw-call and resource counters without estimating them', () => {
+  const renderer = rendererFixture() as RendererLike & {
+    info: { render: { calls: number }; memory: { geometries: number; textures: number } };
+  };
+  renderer.info = { render: { calls: 12 }, memory: { geometries: 7, textures: 4 } };
+  const view = createGameView(containerFixture(), { createRenderer: () => renderer });
+
+  expect(view.getDiagnostics?.()).toEqual({ drawCalls: 12, geometries: 7, textures: 4 });
+  view.dispose();
+});
+
 it('disposes the prior term textures before replacing gate labels', () => {
   const textures: THREE.Texture[] = [];
   const view = createGameView(containerFixture(), {

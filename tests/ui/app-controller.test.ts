@@ -157,6 +157,27 @@ afterEach(() => {
 });
 
 describe('menu and run setup', () => {
+  it('exposes a test-only answer hook that uses the normal reducer and checkpoint path', () => {
+    const saveRun = vi.fn(() => true);
+    const view = viewFixture();
+    const app = createAppController(document.createElement('main'), dependencies({
+      saveRun,
+      createGameView: view.createView,
+      enableTestHooks: true,
+    }));
+    app.root.querySelector<HTMLButtonElement>('[data-level="1"]')!.click();
+    const before = app.testHook!.snapshot();
+    const selectedId = before.choices![0].id;
+
+    expect(app.testHook!.answer(selectedId)).toBe(true);
+    expect(app.getState().run?.questionIndex).toBe(1);
+    expect(saveRun).toHaveBeenCalledWith(expect.objectContaining({ questionIndex: 1 }), expect.any(Function));
+    expect(view.view.setGateTerms).toHaveBeenCalledTimes(2);
+    expect(app.testHook!.answer('not-a-visible-choice')).toBe(false);
+    expect(app.getState().run?.questionIndex).toBe(1);
+    app.destroy();
+  });
+
   it('labels the official dataset and starts the selected 20-question level', () => {
     const root = document.createElement('main');
     const startRun = vi.fn();

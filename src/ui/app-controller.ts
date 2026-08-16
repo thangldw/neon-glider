@@ -1,5 +1,10 @@
 import { loadContent as loadBuiltContent } from '../content';
 import type { HanziEntry, HskLevel } from '../content/types';
+import {
+  createPerfMonitor,
+  type PerformanceSnapshot,
+  type PerfMonitor,
+} from '../diagnostics/perf-overlay';
 import { bindActions as bindGameActions, type ActionHandlers } from '../input/actions';
 import {
   createGameView as createThreeGameView,
@@ -54,6 +59,8 @@ export interface AppControllerDependencies {
   cancelFrame?: (handle: number) => void;
   prefersReducedMotion?: () => boolean;
   questionDurationMs?: number;
+  enableTestHooks?: boolean;
+  perfMonitor?: PerfMonitor;
 }
 
 export interface AppControllerState {
@@ -64,8 +71,20 @@ export interface AppControllerState {
 
 export interface AppController {
   readonly root: HTMLElement;
+  readonly testHook?: AppTestHook;
   destroy(): void;
   getState(): AppControllerState;
+}
+
+export interface AppTestSnapshot extends AppControllerState {
+  performance: PerformanceSnapshot;
+  reducedMotion: boolean;
+}
+
+export interface AppTestHook {
+  snapshot(): AppTestSnapshot;
+  answer(selectedId: string): boolean;
+  resetPerformance(): void;
 }
 
 const COUNTDOWN_SECONDS = 3;
@@ -219,6 +238,12 @@ export function createAppController(
   const prefersReducedMotion = dependencies.prefersReducedMotion
     ?? (() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const questionDurationMs = () => dependencies.questionDurationMs ?? getQuestionDurationMs(run?.level ?? progress.selectedLevel);
+  const perfMonitor = dependencies.perfMonitor ?? createPerfMonitor({
+    visible: import.meta.env.DEV && import.meta.env.MODE !== 'test',
+    host: document.body,
+  });
+  const enableTestHooks = dependencies.enableTestHooks
+    ?? new URLSearchParams(window.location.search).get('e2e') === '1';
 
   let screen: AppScreen = 'menu';
   let run: RunState | null = null;
@@ -238,6 +263,7 @@ export function createAppController(
   let storageUnavailable = false;
   let resumeOnVisible = false;
   let resumeAfterContextRestore = false;
+  let effectiveReducedMotion = false;
 
   const showStorageWarning = () => {
     storageUnavailable = true;
@@ -325,6 +351,7 @@ export function createAppController(
     if (destroyed || !gameView) return;
     const elapsedSeconds = timestamp / 1_000;
     gameView.render(elapsedSeconds);
+    perfMonitor.record(timestamp, gameView.getDiagnostics?.() ?? { drawCalls: 0, geometries: 0, textures: 0 });
     if (screen === 'playing') {
       const delta = frameAnchorSeconds === null ? 0 : elapsedSeconds - frameAnchorSeconds;
       frameAnchorSeconds = elapsedSeconds;
@@ -383,20 +410,27 @@ export function createAppController(
     showReview();
   };
 
-  const resolveCurrentQuestion = () => {
-    if (!run || screen !== 'playing' || !choices) return;
-    const selected = choices[run.lane];
+  const answerSelected = (selectedId: string): boolean => {
+    if (!run || screen !== 'playing' || !choices) return false;
+    const selected = choices.find((choice) => choice.id === selectedId);
+    if (!selected) return false;
     const correctId = run.questionIds[run.questionIndex];
     run = answerCurrent(run, selected.id, correctId);
     saveCheckpoint();
     clearPlayingTimers(false);
     if (run.status === 'complete') {
       finishRun();
-      return;
+      return true;
     }
     choices = createGateChoices(run, entries, entriesById);
     updateQuestion(true);
     startPlayingTimers(false);
+    return true;
+  };
+
+  const resolveCurrentQuestion = (): boolean => {
+    if (!run || !choices) return false;
+    return answerSelected(choices[run.lane].id);
   };
 
   const startPlayingTimers = (resetFrameAnchor = true) => {
@@ -484,8 +518,9 @@ export function createAppController(
     root.replaceChildren(gameScreen.element);
     appendStorageWarning();
     try {
+      effectiveReducedMotion = progress.reducedMotion || prefersReducedMotion();
       gameView = createGameView(gameScreen.viewport, {
-        reducedMotion: progress.reducedMotion || prefersReducedMotion(),
+        reducedMotion: effectiveReducedMotion,
         onContextLost: () => {
           resumeAfterContextRestore = screen === 'playing' || screen === 'countdown';
           pause('Mất ngữ cảnh WebGL. Trò chơi đang chờ khôi phục.');
@@ -563,14 +598,28 @@ export function createAppController(
     showFatal('content');
   }
 
+  const testHook: AppTestHook | undefined = enableTestHooks ? {
+    snapshot: () => structuredClone({
+      screen,
+      run,
+      choices,
+      performance: perfMonitor.snapshot(),
+      reducedMotion: effectiveReducedMotion,
+    }),
+    answer: answerSelected,
+    resetPerformance: () => perfMonitor.reset(),
+  } : undefined;
+
   return {
     root,
+    testHook,
     getState: () => ({ screen, run, choices }),
     destroy() {
       if (destroyed) return;
       destroyed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       stopGameplay();
+      perfMonitor.dispose();
       root.replaceChildren();
     },
   };

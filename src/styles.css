@@ -54,9 +54,17 @@ button {
 
 button:focus-visible,
 input:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:not([tabindex="-1"]):focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
+}
+
+.game-viewport:focus-visible {
+  outline: none;
+}
+
+[tabindex="-1"]:focus {
+  outline: none;
 }
 
 .eyebrow,
@@ -323,6 +331,20 @@ input:focus-visible,
   color: var(--amber);
   background: var(--panel-strong);
   font-size: 0.78rem;
+}
+
+.perf-overlay {
+  position: fixed;
+  z-index: 9;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.5rem;
+  color: var(--cyan);
+  background: var(--panel-strong);
+  font: 0.68rem/1.3 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  pointer-events: none;
 }
 
 .sr-only {

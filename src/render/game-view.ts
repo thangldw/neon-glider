@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { RendererDiagnostics } from '../diagnostics/perf-overlay';
 import { createCourse, laneToX, lerpLaneX, type Course, type Lane } from './course';
 import { createGlyphTexture } from './glyph-texture';
 
@@ -11,6 +12,7 @@ export interface GameView {
   resetGatePhase(): void;
   setPaused(paused: boolean): void;
   render(elapsedSeconds: number): void;
+  getDiagnostics?(): RendererDiagnostics;
   dispose(): void;
 }
 
@@ -22,6 +24,10 @@ export interface RendererLike {
   setAnimationLoop(callback: null): void;
   dispose(): void;
   forceContextLoss?(): void;
+  readonly info?: {
+    readonly render: { readonly calls: number };
+    readonly memory: { readonly geometries: number; readonly textures: number };
+  };
 }
 
 export interface GameViewOptions {
@@ -219,6 +225,13 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
       camera.lookAt(visualX * 0.08, 0.4, -14);
       course.update(visualElapsedSeconds);
       renderer.render(scene, camera);
+    },
+    getDiagnostics() {
+      return {
+        drawCalls: renderer.info?.render.calls ?? 0,
+        geometries: renderer.info?.memory.geometries ?? 0,
+        textures: renderer.info?.memory.textures ?? 0,
+      };
     },
     dispose() {
       if (disposed) return;
