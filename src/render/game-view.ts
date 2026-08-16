@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { createCourse, laneToX, lerpLaneX, type Course, type Lane } from './course';
 import { createGlyphTexture } from './glyph-texture';
 
-const MAX_FRAME_DELTA_SECONDS = 0.25;
+export const MAX_FRAME_DELTA_SECONDS = 0.25;
 
 export interface GameView {
   setLane(lane: Lane): void;
   setGateTerms(terms: readonly [string, string, string]): void;
+  setQuestionDuration(durationSeconds: number): void;
   resetGatePhase(): void;
   setPaused(paused: boolean): void;
   render(elapsedSeconds: number): void;
@@ -74,6 +75,7 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
   let externalElapsedAnchor: number | null = null;
   let visualElapsedSeconds = 0;
   let gatePhaseStartVisualSeconds = 0;
+  let questionDurationSeconds = 4.8;
   let gateTerms: readonly [string, string, string] | null = null;
   let gateTextures: THREE.Texture[] = [];
 
@@ -118,6 +120,7 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
     keyLight.position.set(3, 7, 4);
     scene.add(keyLight);
     course = createCourse();
+    course.setGateTravelSeconds(questionDurationSeconds);
     scene.add(course.root);
     if (gatePhaseStartVisualSeconds > 0) {
       course.update(gatePhaseStartVisualSeconds);
@@ -178,6 +181,15 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
       const nextTerms = [...terms] as [string, string, string];
       applyGateTerms(nextTerms);
       gateTerms = nextTerms;
+    },
+    setQuestionDuration(durationSeconds) {
+      if (disposed) return;
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        throw new RangeError('question duration must be positive and finite');
+      }
+      questionDurationSeconds = durationSeconds;
+      course?.setGateTravelSeconds(durationSeconds);
+      gatePhaseStartVisualSeconds = visualElapsedSeconds;
     },
     resetGatePhase() {
       if (disposed) return;

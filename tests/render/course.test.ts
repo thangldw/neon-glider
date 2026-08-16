@@ -37,3 +37,19 @@ it('moves gates forward and resets their phase without touching simulation state
   expect(gate.position.z).toBe(startingZ);
   course.dispose();
 });
+
+it('varies gate reading distance while preserving the fixed course speed', () => {
+  const course = createCourse();
+  const gate = course.root.getObjectByName('gate-1')!;
+
+  course.setGateTravelSeconds(5.4);
+  expect(gate.position.z).toBe(-25);
+  course.update(5.4);
+  expect(gate.position.z).toBeCloseTo(2, 8);
+
+  course.setGateTravelSeconds(4.2);
+  expect(gate.position.z).toBe(-19);
+  course.update(9.6);
+  expect(gate.position.z).toBeCloseTo(2, 8);
+  course.dispose();
+});

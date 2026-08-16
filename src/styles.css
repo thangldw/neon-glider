@@ -270,6 +270,9 @@ input:focus-visible,
 
 .review-screen {
   align-content: start;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
 }
 

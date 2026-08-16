@@ -202,6 +202,21 @@ it('anchors a reset before the first external frame at visual time zero', () => 
   view.dispose();
 });
 
+it('preserves the configured gate reading distance after WebGL context restoration', () => {
+  const renderer = rendererFixture();
+  const view = createGameView(containerFixture(), { createRenderer: () => renderer });
+  view.setQuestionDuration(5.4);
+  view.resetGatePhase();
+  view.render(0);
+  expect(latestGateZ(renderer)).toBe(-25);
+
+  renderer.domElement.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  renderer.domElement.dispatchEvent(new Event('webglcontextrestored'));
+  view.render(10);
+  expect(latestGateZ(renderer)).toBe(-25);
+  view.dispose();
+});
+
 it('freezes local visual time across pauses, invalid frames, and context restore before accepting a new frame delta', () => {
   const renderer = rendererFixture();
   const view = createGameView(containerFixture(), { createRenderer: () => renderer });

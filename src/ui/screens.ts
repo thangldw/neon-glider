@@ -28,6 +28,7 @@ export function createMenuScreen(options: {
 }): HTMLElement {
   const screen = element('section', 'menu-screen');
   screen.dataset.screen = 'menu';
+  screen.tabIndex = -1;
   screen.setAttribute('aria-labelledby', 'game-title');
 
   const eyebrow = element('p', 'eyebrow');
@@ -73,11 +74,13 @@ export interface GameScreen {
 export function createGameScreen(onPause: () => void): GameScreen {
   const screen = element('section', 'game-screen');
   screen.dataset.screen = 'game';
-  screen.tabIndex = 0;
+  screen.tabIndex = -1;
   screen.setAttribute('aria-label', 'Đường bay luyện chữ Hán');
 
   const viewport = element('div', 'game-viewport');
   viewport.dataset.gameViewport = '';
+  viewport.tabIndex = 0;
+  viewport.setAttribute('aria-label', 'Vuốt, chạm mép hoặc dùng phím mũi tên để đổi làn');
 
   const hud = element('div', 'game-hud');
   const objective = element('section', 'objective-chip');
@@ -183,9 +186,12 @@ export function createReviewScreen(options: {
 }): HTMLElement {
   const screen = element('section', 'review-screen');
   screen.dataset.screen = 'review';
+  screen.tabIndex = -1;
+  screen.setAttribute('aria-labelledby', 'review-title');
   const eyebrow = element('p', 'eyebrow');
   eyebrow.textContent = `HSK ${options.run.level} · ${options.run.score} điểm`;
   const title = element('h1');
+  title.id = 'review-title';
   title.textContent = 'Ôn lại lượt bay';
   const mistakes = options.run.answers.filter((answer) => !answer.correct);
   const summary = element('p', 'review-summary');
@@ -219,6 +225,7 @@ export function createReviewScreen(options: {
 export function createFatalScreen(kind: 'content' | 'webgl' | 'unknown'): HTMLElement {
   const screen = element('section', 'fatal-screen');
   screen.dataset.screen = 'fatal';
+  screen.tabIndex = -1;
   screen.setAttribute('role', 'alert');
   const title = element('h1');
   title.textContent = kind === 'content' ? 'Không thể tải nội dung'

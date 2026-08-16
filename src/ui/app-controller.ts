@@ -1,7 +1,12 @@
 import { loadContent as loadBuiltContent } from '../content';
 import type { HanziEntry, HskLevel } from '../content/types';
 import { bindActions as bindGameActions, type ActionHandlers } from '../input/actions';
-import { createGameView as createThreeGameView, type GameView, type GameViewOptions } from '../render/game-view';
+import {
+  createGameView as createThreeGameView,
+  MAX_FRAME_DELTA_SECONDS,
+  type GameView,
+  type GameViewOptions,
+} from '../render/game-view';
 import { answerCurrent, createRun as createSimulationRun, moveLane } from '../simulation/run';
 import type { ProgressState, RunState } from '../simulation/types';
 import {
@@ -64,7 +69,12 @@ export interface AppController {
 }
 
 const COUNTDOWN_SECONDS = 3;
-const DEFAULT_QUESTION_DURATION_MS = 4_800;
+const QUESTION_DURATION_MS: Readonly<Record<HskLevel, number>> = { 1: 5_400, 2: 4_800, 3: 4_200 };
+
+/** Higher levels get less reading time without changing glider physics. */
+export function getQuestionDurationMs(level: HskLevel): number {
+  return QUESTION_DURATION_MS[level];
+}
 
 function safeBrowserProgress(onUnavailable: StorageUnavailableHandler): ProgressState {
   try {
@@ -119,7 +129,23 @@ function hash(value: string): number {
   return result >>> 0;
 }
 
-function createChoices(
+/**
+ * Level 1 uses broad deterministic distractors. Level 2 prefers equal glyph
+ * length. Level 3 additionally prioritizes shared glyphs for closer visual
+ * confusability. Hash order remains the stable tie-breaker.
+ */
+export function scoreDistractorSimilarity(level: HskLevel, correct: HanziEntry, candidate: HanziEntry): number {
+  if (level === 1) return 0;
+  const correctGlyphs = Array.from(correct.term);
+  const candidateGlyphs = Array.from(candidate.term);
+  const lengthScore = Math.max(0, 10 - Math.abs(correctGlyphs.length - candidateGlyphs.length) * 5);
+  if (level === 2) return lengthScore;
+  const candidateSet = new Set(candidateGlyphs);
+  const sharedGlyphs = new Set(correctGlyphs.filter((glyph) => candidateSet.has(glyph))).size;
+  return lengthScore + sharedGlyphs * 20;
+}
+
+export function createGateChoices(
   run: RunState,
   entries: readonly HanziEntry[],
   entriesById: ReadonlyMap<string, HanziEntry>,
@@ -128,20 +154,44 @@ function createChoices(
   const correct = entriesById.get(correctId);
   if (!correct) throw new Error(`Missing question entry: ${correctId}`);
   const salt = `${run.seed}:${run.questionIndex}`;
-  const distractors = entries
-    .filter((entry) => entry.level <= run.level && entry.id !== correct.id)
-    .sort((left, right) => hash(`${salt}:${left.id}`) - hash(`${salt}:${right.id}`) || left.sourceOrder - right.sourceOrder)
+  const uniqueTerms = new Map<string, HanziEntry>();
+  for (const entry of [...entries].sort((left, right) => left.sourceOrder - right.sourceOrder || left.id.localeCompare(right.id))) {
+    if (entry.level <= run.level && entry.term !== correct.term && !uniqueTerms.has(entry.term)) uniqueTerms.set(entry.term, entry);
+  }
+  const distractors = [...uniqueTerms.values()]
+    .sort((left, right) => scoreDistractorSimilarity(run.level, correct, right)
+      - scoreDistractorSimilarity(run.level, correct, left)
+      || hash(`${salt}:${left.id}`) - hash(`${salt}:${right.id}`)
+      || left.sourceOrder - right.sourceOrder)
     .slice(0, 2);
   if (distractors.length !== 2) throw new Error(`Need two distractors for HSK ${run.level}`);
   const ordered = [correct, ...distractors]
     .sort((left, right) => hash(`${salt}:lane:${left.id}`) - hash(`${salt}:lane:${right.id}`) || left.sourceOrder - right.sourceOrder)
     .map(({ id, term }) => ({ id, term }));
-  return ordered as [GateChoice, GateChoice, GateChoice];
+  const choices = ordered as [GateChoice, GateChoice, GateChoice];
+  if (new Set(choices.map(({ term }) => term)).size !== 3
+    || choices.filter(({ id }) => id === correct.id).length !== 1) {
+    throw new Error('Gate choices must contain three unique terms and exactly one correct ID');
+  }
+  return choices;
 }
 
-function isCompatibleRun(run: RunState, entriesById: ReadonlyMap<string, HanziEntry>): boolean {
-  return isRunState(run)
-    && run.questionIds.every((id) => entriesById.get(id)?.level === run.level);
+function isCompatibleRun(
+  run: RunState,
+  entries: readonly HanziEntry[],
+  entriesById: ReadonlyMap<string, HanziEntry>,
+): boolean {
+  if (!isRunState(run) || !run.questionIds.every((id) => entriesById.get(id)?.level === run.level)) return false;
+  try {
+    return run.answers.every((answer, questionIndex) => {
+      const selected = entriesById.get(answer.selectedId);
+      if (!selected || selected.level > run.level) return false;
+      const snapshot = { ...run, questionIndex };
+      return createGateChoices(snapshot, entries, entriesById).some(({ id }) => id === answer.selectedId);
+    });
+  } catch {
+    return false;
+  }
 }
 
 function promptFor(run: RunState, entriesById: ReadonlyMap<string, HanziEntry>): string {
@@ -168,7 +218,7 @@ export function createAppController(
   const cancelFrame = dependencies.cancelFrame ?? cancelAnimationFrame;
   const prefersReducedMotion = dependencies.prefersReducedMotion
     ?? (() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-  const questionDurationMs = dependencies.questionDurationMs ?? DEFAULT_QUESTION_DURATION_MS;
+  const questionDurationMs = () => dependencies.questionDurationMs ?? getQuestionDurationMs(run?.level ?? progress.selectedLevel);
 
   let screen: AppScreen = 'menu';
   let run: RunState | null = null;
@@ -180,7 +230,8 @@ export function createAppController(
   let gameView: GameView | null = null;
   let unbindActions: (() => void) | null = null;
   let frameHandle: number | null = null;
-  let questionTimer: ReturnType<typeof setTimeout> | null = null;
+  let frameAnchorSeconds: number | null = null;
+  let questionElapsedMs = 0;
   let checkpointTimer: ReturnType<typeof setInterval> | null = null;
   let countdownTimer: ReturnType<typeof setInterval> | null = null;
   let destroyed = false;
@@ -202,11 +253,10 @@ export function createAppController(
     countdownTimer = null;
   };
 
-  const clearPlayingTimers = () => {
-    if (questionTimer !== null) clearTimeout(questionTimer);
+  const clearPlayingTimers = (resetFrameAnchor = true) => {
     if (checkpointTimer !== null) clearInterval(checkpointTimer);
-    questionTimer = null;
     checkpointTimer = null;
+    if (resetFrameAnchor) frameAnchorSeconds = null;
   };
 
   const saveCheckpoint = () => {
@@ -228,12 +278,15 @@ export function createAppController(
     gameView?.dispose();
     gameView = null;
     gameScreen = null;
+    questionElapsedMs = 0;
   };
 
   const showFatal = (kind: 'content' | 'webgl' | 'unknown') => {
     stopGameplay();
     screen = 'fatal';
-    root.replaceChildren(createFatalScreen(kind));
+    const fatal = createFatalScreen(kind);
+    root.replaceChildren(fatal);
+    queueMicrotask(() => fatal.focus({ preventScroll: true }));
     appendStorageWarning();
   };
 
@@ -242,7 +295,7 @@ export function createAppController(
     run = null;
     choices = null;
     screen = 'menu';
-    root.replaceChildren(createMenuScreen({
+    const menu = createMenuScreen({
       selectedLevel: progress.selectedLevel,
       reducedMotion: progress.reducedMotion,
       onStart: (level) => startSelectedLevel(level),
@@ -250,8 +303,10 @@ export function createAppController(
         progress = { ...progress, reducedMotion: enabled };
         persistProgress();
       },
-    }));
+    });
+    root.replaceChildren(menu);
     appendStorageWarning();
+    queueMicrotask(() => menu.focus({ preventScroll: true }));
   };
 
   const updateQuestion = (resetGate: boolean) => {
@@ -259,13 +314,26 @@ export function createAppController(
     gameScreen.update(run, promptFor(run, entriesById), choices);
     gameView.setLane(run.lane);
     gameView.setGateTerms(choices.map((choice) => choice.term) as [string, string, string]);
-    if (resetGate) gameView.resetGatePhase();
+    if (resetGate) {
+      questionElapsedMs = 0;
+      gameView.setQuestionDuration(questionDurationMs() / 1_000);
+      gameView.resetGatePhase();
+    }
   };
 
   const renderFrame: FrameRequestCallback = (timestamp) => {
     if (destroyed || !gameView) return;
-    gameView.render(timestamp / 1_000);
-    frameHandle = requestFrame(renderFrame);
+    const elapsedSeconds = timestamp / 1_000;
+    gameView.render(elapsedSeconds);
+    if (screen === 'playing') {
+      const delta = frameAnchorSeconds === null ? 0 : elapsedSeconds - frameAnchorSeconds;
+      frameAnchorSeconds = elapsedSeconds;
+      if (delta >= 0 && delta <= MAX_FRAME_DELTA_SECONDS) questionElapsedMs += delta * 1_000;
+      if (questionElapsedMs >= questionDurationMs() - 0.01) resolveCurrentQuestion();
+    } else {
+      frameAnchorSeconds = null;
+    }
+    if (!destroyed && gameView) frameHandle = requestFrame(renderFrame);
   };
 
   const move = (direction: -1 | 1) => {
@@ -286,7 +354,7 @@ export function createAppController(
     stopGameplay();
     screen = 'review';
     const completedRun = run;
-    root.replaceChildren(createReviewScreen({
+    const review = createReviewScreen({
       run: completedRun,
       entriesById,
       onRestart: () => {
@@ -297,8 +365,10 @@ export function createAppController(
         acknowledgeRun();
         renderMenu();
       },
-    }));
+    });
+    root.replaceChildren(review);
     appendStorageWarning();
+    queueMicrotask(() => review.focus({ preventScroll: true }));
   };
 
   const finishRun = () => {
@@ -319,24 +389,45 @@ export function createAppController(
     const correctId = run.questionIds[run.questionIndex];
     run = answerCurrent(run, selected.id, correctId);
     saveCheckpoint();
-    clearPlayingTimers();
+    clearPlayingTimers(false);
     if (run.status === 'complete') {
       finishRun();
       return;
     }
-    choices = createChoices(run, entries, entriesById);
+    choices = createGateChoices(run, entries, entriesById);
     updateQuestion(true);
-    startPlayingTimers();
+    startPlayingTimers(false);
   };
 
-  const startPlayingTimers = () => {
-    clearPlayingTimers();
-    questionTimer = setTimeout(resolveCurrentQuestion, questionDurationMs);
+  const startPlayingTimers = (resetFrameAnchor = true) => {
+    clearPlayingTimers(resetFrameAnchor);
     checkpointTimer = setInterval(saveCheckpoint, 500);
+  };
+
+  const holdForVisibility = () => {
+    if (!run || !gameScreen || !gameView) return;
+    clearCountdown();
+    clearPlayingTimers();
+    resumeOnVisible = true;
+    screen = 'paused';
+    run = { ...run, status: 'paused' };
+    gameView.setPaused(true);
+    gameScreen.overlay.replaceChildren(createPauseOverlay(
+      'Trang đang bị ẩn. Lượt chơi sẽ tiếp tục khi trang hiển thị lại.',
+      () => beginCountdown(),
+      () => {
+        clearRun(showStorageWarning);
+        renderMenu();
+      },
+    ));
   };
 
   const enterPlaying = () => {
     if (!run || !gameView || !gameScreen || destroyed) return;
+    if (document.visibilityState === 'hidden') {
+      holdForVisibility();
+      return;
+    }
     clearCountdown();
     screen = 'playing';
     run = { ...run, status: 'playing' };
@@ -344,11 +435,15 @@ export function createAppController(
     gameView.setPaused(false);
     saveCheckpoint();
     startPlayingTimers();
-    gameScreen.element.focus({ preventScroll: true });
+    gameScreen.viewport.focus({ preventScroll: true });
   };
 
   const beginCountdown = () => {
     if (!run || !gameScreen || !gameView || destroyed) return;
+    if (document.visibilityState === 'hidden') {
+      holdForVisibility();
+      return;
+    }
     clearCountdown();
     clearPlayingTimers();
     screen = 'countdown';
@@ -401,7 +496,7 @@ export function createAppController(
         },
       });
       updateQuestion(true);
-      unbindActions = bindActions(gameScreen.element, {
+      unbindActions = bindActions(gameScreen.viewport, {
         left: () => move(-1),
         right: () => move(1),
         pause: () => pause(),
@@ -421,7 +516,7 @@ export function createAppController(
       progress = { ...progress, selectedLevel: level };
       persistProgress();
       run = suppliedRun ?? createSimulationRun(entries, progress.mastery, level, createSeed(), now());
-      choices = createChoices(run, entries, entriesById);
+      choices = createGateChoices(run, entries, entriesById);
       if (!mountGameplay()) return;
       enterPlaying();
     } catch {
@@ -431,8 +526,11 @@ export function createAppController(
 
   const onVisibilityChange = () => {
     if (document.visibilityState === 'hidden') {
-      resumeOnVisible = screen === 'playing' || screen === 'countdown';
-      if (resumeOnVisible) pause('Trang đã bị ẩn. Lượt chơi được giữ nguyên.');
+      const wasActive = screen === 'playing' || screen === 'countdown';
+      if (wasActive) {
+        resumeOnVisible = true;
+        pause('Trang đã bị ẩn. Lượt chơi được giữ nguyên.');
+      }
       else saveCheckpoint();
       return;
     }
@@ -450,11 +548,11 @@ export function createAppController(
     const restored = Object.hasOwn(dependencies, 'restoredRun')
       ? dependencies.restoredRun ?? null
       : loadRun(showStorageWarning);
-    if (restored && isCompatibleRun(restored, entriesById)) {
+    if (restored && isCompatibleRun(restored, entries, entriesById)) {
       run = restored.status === 'complete' ? restored : { ...restored, status: 'paused' };
       if (run.status === 'complete') showReview();
       else {
-        choices = createChoices(run, entries, entriesById);
+        choices = createGateChoices(run, entries, entriesById);
         if (mountGameplay()) beginCountdown();
       }
     } else {
