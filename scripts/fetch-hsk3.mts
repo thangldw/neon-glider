@@ -11,24 +11,88 @@ const EXPECTED_HASH = 'ec74ce0439e837bbb15154be13e747ae798903b2fd3a331629df6c3b4
 const LEVEL_NAMES: Record<HskLevel, string> = { 1: '一级', 2: '二级', 3: '三级' };
 const MAX_REQUEST_ATTEMPTS = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
+const PAGE_SIZE = 10;
+const EXPECTED_HEADERS = ['No.', '级别', '词语', '拼音', '词性'];
 
-export function parseTermsPage(html: string, level: HskLevel): SourceTerm[] {
+export interface ParsedTermsPage {
+  terms: SourceTerm[];
+  total: number;
+}
+
+export function parseSourcePage(html: string, level: HskLevel): ParsedTermsPage {
   const $ = load(html);
+  const table = $('table');
+  const header = table.first().find('tr').first().find('th, td')
+    .map((_, cell) => $(cell).text().trim()).get();
 
-  return $('table tr').toArray().flatMap((row) => {
+  if (table.length !== 1 || JSON.stringify(header) !== JSON.stringify(EXPECTED_HEADERS)) {
+    throw new Error('HSK source table header is invalid');
+  }
+
+  const totalMatch = $('#tongji').text().match(/共有\s*(\d+)\s*条记录/);
+  const total = Number(totalMatch?.[1]);
+  if (!Number.isSafeInteger(total)) throw new Error('HSK source reported total is invalid');
+
+  const sourceOrders = new Set<number>();
+  const terms = table.find('tr').slice(1).toArray().map((row) => {
     const cells = $(row).find('td').map((_, cell) => $(cell).text().trim()).get();
+    if (cells.length !== EXPECTED_HEADERS.length) {
+      throw new Error('HSK source row column count is invalid');
+    }
+
     const sourceOrder = Number(cells[0]);
+    if (!Number.isSafeInteger(sourceOrder) || sourceOrder < 1) {
+      throw new Error('HSK source row order is invalid');
+    }
+    if (cells[1] !== LEVEL_NAMES[level]) throw new Error('HSK source row level is invalid');
+    if (!cells[2] || !cells[3]) throw new Error('HSK source row term is invalid');
+    if (sourceOrders.has(sourceOrder)) throw new Error('HSK source row order is duplicated');
+    sourceOrders.add(sourceOrder);
 
-    if (cells.length < 4 || !Number.isInteger(sourceOrder)) return [];
-
-    return [{
+    return {
       id: `hsk3-l${level}-${String(sourceOrder).padStart(4, '0')}`,
       term: cells[2],
       pinyin: cells[3],
       level,
       sourceOrder,
-    }];
+    };
   });
+
+  return { terms, total };
+}
+
+export function parseTermsPage(html: string, level: HskLevel): SourceTerm[] {
+  return parseSourcePage(html, level).terms;
+}
+
+export function appendTermsPage(
+  collected: SourceTerm[],
+  page: ParsedTermsPage,
+  expectedTotal: number | undefined,
+): { complete: boolean; terms: SourceTerm[]; total: number } {
+  const total = expectedTotal ?? page.total;
+  if (!Number.isSafeInteger(total) || total < 1) throw new Error('HSK source reported total is invalid');
+  if (expectedTotal !== undefined && page.total !== expectedTotal) {
+    throw new Error('HSK source reported total changed');
+  }
+  if (collected.length >= total) throw new Error('HSK source page exceeds the reported total');
+  if (page.terms.length === 0) {
+    throw new Error('HSK source page is empty before the reported total');
+  }
+
+  const remaining = total - collected.length;
+  if (page.terms.length !== Math.min(PAGE_SIZE, remaining)) {
+    throw new Error('HSK source page is truncated');
+  }
+
+  const termIds = new Set(collected.map((term) => term.id));
+  for (const term of page.terms) {
+    if (termIds.has(term.id)) throw new Error('HSK source page contains a duplicate term id');
+    termIds.add(term.id);
+  }
+
+  const terms = [...collected, ...page.terms];
+  return { complete: terms.length === total, terms, total };
 }
 
 interface HttpResult {
@@ -102,6 +166,9 @@ async function fetchSource(): Promise<SourceSnapshot> {
   const terms: SourceTerm[] = [];
 
   for (const level of [1, 2, 3] as const) {
+    let levelTerms: SourceTerm[] = [];
+    let expectedTotal: number | undefined;
+
     for (let offset = 0; ; offset += 10) {
       const url = new URL(`https://admin.chinesetest.cn/standardsAction.do;jsessionid=${sessionId}`);
       url.search = new URLSearchParams({
@@ -119,12 +186,15 @@ async function fetchSource(): Promise<SourceSnapshot> {
         throw new Error(`HSK level ${level} offset ${offset}: ${response.status}`);
       }
 
-      const page = parseTermsPage(response.body.toString('utf8'), level);
-      if (page.length === 0) break;
+      const page = parseSourcePage(response.body.toString('utf8'), level);
+      const result = appendTermsPage(levelTerms, page, expectedTotal);
+      levelTerms = result.terms;
+      expectedTotal = result.total;
 
-      terms.push(...page);
-      if (page.length < 10) break;
+      if (result.complete) break;
     }
+
+    terms.push(...levelTerms);
   }
 
   const syllabusResponse = await getSource(SYLLABUS_URL);
