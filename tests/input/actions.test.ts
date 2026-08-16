@@ -53,6 +53,18 @@ it('dispatches exactly one directional action for a swipe beyond 32 CSS pixels',
   dispose();
 });
 
+it('does not treat an exactly 32 pixel drag as a lane swipe', () => {
+  const element = document.createElement('div');
+  Object.defineProperty(element, 'getBoundingClientRect', { value: () => new DOMRect(0, 0, 300, 100) });
+  const handlers = actionHandlers();
+  const dispose = bindActions(element, handlers);
+  element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 3, clientX: 150, clientY: 50, button: 0 }));
+  element.dispatchEvent(new PointerEvent('pointerup', { pointerId: 3, clientX: 182, clientY: 50 }));
+  expect(handlers.left).not.toHaveBeenCalled();
+  expect(handlers.right).not.toHaveBeenCalled();
+  dispose();
+});
+
 it('maps edge taps but leaves the middle of the playfield inert', () => {
   const element = document.createElement('div');
   Object.defineProperty(element, 'getBoundingClientRect', {
@@ -95,6 +107,49 @@ it('falls back to touch swipes when Pointer Events are unavailable', () => {
     if (original) Object.defineProperty(window, 'PointerEvent', original);
     else delete (window as Window & { PointerEvent?: unknown }).PointerEvent;
   }
+});
+
+it('owns touch-action for reliable lane swipes and restores it after pointer cancellation', () => {
+  const element = document.createElement('div');
+  element.style.touchAction = 'pan-y';
+  const handlers = actionHandlers();
+  const dispose = bindActions(element, handlers);
+  expect(element.style.touchAction).toBe('none');
+
+  element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 4, clientX: 180, clientY: 50, button: 0 }));
+  element.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 4 }));
+  element.dispatchEvent(new PointerEvent('pointerup', { pointerId: 4, clientX: 80, clientY: 50 }));
+  expect(handlers.left).not.toHaveBeenCalled();
+
+  dispose();
+  expect(element.style.touchAction).toBe('pan-y');
+});
+
+it('releases active pointer capture exactly once when disposed', () => {
+  const element = document.createElement('div');
+  const release = vi.fn();
+  Object.assign(element, {
+    setPointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn(() => true),
+    releasePointerCapture: release,
+  });
+  const dispose = bindActions(element, actionHandlers());
+  element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 8, clientX: 10, clientY: 20, button: 0 }));
+  dispose();
+  dispose();
+  expect(release).toHaveBeenCalledTimes(1);
+  expect(release).toHaveBeenCalledWith(8);
+});
+
+it('clears a lost pointer capture so a later pointer-up cannot dispatch a stale swipe', () => {
+  const element = document.createElement('div');
+  const handlers = actionHandlers();
+  const dispose = bindActions(element, handlers);
+  element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 9, clientX: 160, clientY: 30, button: 0 }));
+  element.dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 9 }));
+  element.dispatchEvent(new PointerEvent('pointerup', { pointerId: 9, clientX: 80, clientY: 30 }));
+  expect(handlers.left).not.toHaveBeenCalled();
+  dispose();
 });
 
 it('removes input listeners when disposed', () => {

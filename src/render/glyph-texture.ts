@@ -10,7 +10,8 @@ export function createGlyphTexture(term: string): THREE.CanvasTexture {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D canvas is unavailable for gate glyphs');
 
-  context.clearRect(0, 0, WIDTH, HEIGHT);
+  context.fillStyle = '#13233e';
+  context.fillRect(0, 0, WIDTH, HEIGHT);
   context.fillStyle = '#ffffff';
   context.font = '700 104px "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
   context.textAlign = 'center';

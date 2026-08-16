@@ -5,6 +5,7 @@ import { createGlyphTexture } from './glyph-texture';
 export interface GameView {
   setLane(lane: Lane): void;
   setGateTerms(terms: readonly [string, string, string]): void;
+  resetGatePhase(): void;
   setPaused(paused: boolean): void;
   render(elapsedSeconds: number): void;
   dispose(): void;
@@ -24,7 +25,9 @@ export interface GameViewOptions {
   reducedMotion?: boolean;
   createRenderer?: (canvas: HTMLCanvasElement) => RendererLike;
   createGlyphTexture?: (term: string) => THREE.Texture;
-  createResizeObserver?: (callback: ResizeObserverCallback) => Pick<ResizeObserver, 'observe' | 'disconnect'>;
+  createResizeObserver?: (callback: ResizeObserverCallback) => Pick<ResizeObserver, 'observe' | 'disconnect'> | undefined;
+  onContextLost?: () => void;
+  onContextRestored?: (resumed: boolean) => void;
 }
 
 function defaultRenderer(canvas: HTMLCanvasElement): RendererLike {
@@ -36,6 +39,7 @@ function createGlider(): { mesh: THREE.Mesh; dispose(): void } {
   geometry.rotateX(Math.PI / 2);
   const material = new THREE.MeshStandardMaterial({ color: 0xffd166, emissive: 0x3b2600, emissiveIntensity: 0.7 });
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = 'glider';
   mesh.position.set(0, 0, 2.1);
   return {
     mesh,
@@ -63,6 +67,7 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
   let visualX = laneToX(lane);
   let paused = false;
   let contextLost = false;
+  let pausedBeforeContextLoss = false;
   let disposed = false;
   let previousElapsed: number | null = null;
   let gateTerms: readonly [string, string, string] | null = null;
@@ -82,12 +87,17 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
 
   const applyGateTerms = (terms: readonly [string, string, string]) => {
     if (!course) return;
-    disposeGateTextures();
-    gateTextures = terms.map((term, index) => {
-      const texture = glyphTextureFactory(term);
-      course?.setGateTexture(index as Lane, texture);
-      return texture;
-    });
+    const replacements: THREE.Texture[] = [];
+    try {
+      for (const term of terms) replacements.push(glyphTextureFactory(term));
+    } catch (error) {
+      for (const texture of replacements) texture.dispose();
+      throw error;
+    }
+    const previous = gateTextures;
+    for (const [index, texture] of replacements.entries()) course.setGateTexture(index as Lane, texture);
+    gateTextures = replacements;
+    for (const texture of previous) texture.dispose();
   };
 
   const buildSceneGraph = () => {
@@ -121,15 +131,21 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
 
   const onContextLost = (event: Event) => {
     event.preventDefault();
+    if (contextLost || disposed) return;
+    pausedBeforeContextLoss = paused;
     contextLost = true;
     paused = true;
     renderer.setAnimationLoop(null);
+    options.onContextLost?.();
   };
   const onContextRestored = () => {
-    if (disposed) return;
+    if (disposed || !contextLost) return;
     contextLost = false;
     buildSceneGraph();
     resize();
+    paused = pausedBeforeContextLoss;
+    previousElapsed = null;
+    options.onContextRestored?.(!paused);
   };
   canvas.addEventListener('webglcontextlost', onContextLost);
   canvas.addEventListener('webglcontextrestored', onContextRestored);
@@ -150,8 +166,12 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
     },
     setGateTerms(terms) {
       if (disposed) return;
-      gateTerms = [...terms] as [string, string, string];
-      applyGateTerms(gateTerms);
+      const nextTerms = [...terms] as [string, string, string];
+      applyGateTerms(nextTerms);
+      gateTerms = nextTerms;
+    },
+    resetGatePhase() {
+      if (!disposed) course?.resetGatePhase();
     },
     setPaused(nextPaused) {
       if (!disposed) paused = nextPaused;
