@@ -172,3 +172,46 @@ it('uses the window resize fallback when ResizeObserver is unavailable', () => {
   expect(renderer.setSize).toHaveBeenLastCalledWith(480, 240);
   view.dispose();
 });
+
+function latestGateZ(renderer: RendererLike): number {
+  const calls = (renderer.render as ReturnType<typeof vi.fn>).mock.calls;
+  const scene = calls.at(-1)![0] as THREE.Scene;
+  return scene.getObjectByName('gate-1')!.position.z;
+}
+
+it('anchors a reset before the first external frame at visual time zero', () => {
+  const renderer = rendererFixture();
+  const view = createGameView(containerFixture(), { createRenderer: () => renderer });
+  view.resetGatePhase();
+  view.render(30);
+
+  expect(latestGateZ(renderer)).toBe(-22);
+  view.dispose();
+});
+
+it('freezes local visual time across pauses, invalid frames, and context restore before accepting a new frame delta', () => {
+  const renderer = rendererFixture();
+  const view = createGameView(containerFixture(), { createRenderer: () => renderer });
+  view.render(10);
+  view.render(10.1);
+  const beforePause = latestGateZ(renderer);
+  view.render(20);
+  expect(latestGateZ(renderer)).toBe(beforePause);
+  view.setPaused(true);
+  view.render(100);
+  view.setPaused(false);
+  view.render(100);
+  expect(latestGateZ(renderer)).toBe(beforePause);
+  view.render(Number.NaN);
+  view.render(99);
+  expect(latestGateZ(renderer)).toBe(beforePause);
+
+  renderer.domElement.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  view.render(1_000);
+  renderer.domElement.dispatchEvent(new Event('webglcontextrestored'));
+  view.render(1_000);
+  expect(latestGateZ(renderer)).toBe(beforePause);
+  view.render(1_000.1);
+  expect(latestGateZ(renderer)).toBeGreaterThan(beforePause);
+  view.dispose();
+});

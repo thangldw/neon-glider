@@ -152,6 +152,18 @@ it('clears a lost pointer capture so a later pointer-up cannot dispatch a stale 
   dispose();
 });
 
+it('ignores a second pointer so its up or cancellation cannot clear the active gesture', () => {
+  const element = document.createElement('div');
+  const handlers = actionHandlers();
+  const dispose = bindActions(element, handlers);
+  element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 160, clientY: 30, button: 0 }));
+  element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 2, clientX: 160, clientY: 30, button: 0 }));
+  element.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 2 }));
+  element.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, clientX: 90, clientY: 30 }));
+  expect(handlers.left).toHaveBeenCalledOnce();
+  dispose();
+});
+
 it('removes input listeners when disposed', () => {
   const handlers = actionHandlers();
   const dispose = bindActions(window, handlers);
