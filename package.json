@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "content:fetch": "tsx scripts/fetch-hsk3.mts",
+    "content:draft": "tsx scripts/draft-meanings.mts",
     "content:build": "tsx scripts/build-content.mts",
     "content:verify": "tsx scripts/verify-content.mts",
     "predeploy": "npm test && npm run content:verify && npm run build",
