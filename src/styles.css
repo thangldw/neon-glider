@@ -208,12 +208,11 @@ input:focus-visible,
 }
 
 .question-prompt {
-  overflow: hidden;
   color: var(--text);
   font-size: clamp(1rem, 2.5vw, 1.35rem);
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .status-strip {

@@ -11,6 +11,7 @@ import {
   MAX_FRAME_DELTA_SECONDS,
   type GameView,
   type GameViewOptions,
+  type FramingDiagnostics,
 } from '../render/game-view';
 import { answerCurrent, createRun as createSimulationRun, moveLane } from '../simulation/run';
 import type { ProgressState, RunState } from '../simulation/types';
@@ -79,6 +80,7 @@ export interface AppController {
 export interface AppTestSnapshot extends AppControllerState {
   performance: PerformanceSnapshot;
   reducedMotion: boolean;
+  framing: FramingDiagnostics | null;
 }
 
 export interface AppTestHook {
@@ -605,6 +607,7 @@ export function createAppController(
       choices,
       performance: perfMonitor.snapshot(),
       reducedMotion: effectiveReducedMotion,
+      framing: gameView?.getFramingDiagnostics?.() ?? null,
     }),
     answer: answerSelected,
     resetPerformance: () => perfMonitor.reset(),

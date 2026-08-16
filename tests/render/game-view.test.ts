@@ -23,6 +23,15 @@ function containerFixture(): HTMLDivElement {
   return container;
 }
 
+function portraitContainerFixture(): HTMLDivElement {
+  const container = document.createElement('div');
+  Object.defineProperties(container, {
+    clientWidth: { value: 412 },
+    clientHeight: { value: 839 },
+  });
+  return container;
+}
+
 it('renders only while active and releases its canvas resources on disposal', () => {
   const renderer = rendererFixture();
   const view = createGameView(containerFixture(), { createRenderer: () => renderer });
@@ -48,6 +57,17 @@ it('reports renderer draw-call and resource counters without estimating them', (
   const view = createGameView(containerFixture(), { createRenderer: () => renderer });
 
   expect(view.getDiagnostics?.()).toEqual({ drawCalls: 12, geometries: 7, textures: 4 });
+  view.dispose();
+});
+
+it.each([0, 1, 2] as const)('keeps the glider in the portrait camera frustum in lane %i', (lane) => {
+  const view = createGameView(portraitContainerFixture(), { createRenderer: rendererFixture });
+  view.setLane(lane);
+  view.render(0);
+  for (let frame = 1; frame <= 120; frame += 1) view.render(frame / 60);
+
+  expect(view.getFramingDiagnostics?.()).toMatchObject({ gliderVisible: true });
+  expect(Math.abs(view.getFramingDiagnostics?.().gliderNdcX ?? Number.POSITIVE_INFINITY)).toBeLessThan(0.9);
   view.dispose();
 });
 

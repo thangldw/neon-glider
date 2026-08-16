@@ -13,7 +13,14 @@ export interface GameView {
   setPaused(paused: boolean): void;
   render(elapsedSeconds: number): void;
   getDiagnostics?(): RendererDiagnostics;
+  getFramingDiagnostics?(): FramingDiagnostics;
   dispose(): void;
+}
+
+export interface FramingDiagnostics {
+  gliderNdcX: number;
+  gliderNdcY: number;
+  gliderVisible: boolean;
 }
 
 export interface RendererLike {
@@ -58,6 +65,11 @@ function createGlider(): { mesh: THREE.Mesh; dispose(): void } {
       material.dispose();
     },
   };
+}
+
+export function getCameraLaneTracking(aspect: number): number {
+  if (!Number.isFinite(aspect) || aspect <= 0) return 0.1;
+  return THREE.MathUtils.clamp(1.05 - aspect * 0.55, 0.1, 0.82);
 }
 
 export function createGameView(container: HTMLElement, options: GameViewOptions = {}): GameView {
@@ -221,8 +233,10 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
       glider.mesh.position.x = visualX;
       glider.mesh.rotation.z = (laneToX(lane) - visualX) * -0.1;
       glider.mesh.position.y = reducedMotion ? 0 : Math.sin(visualElapsedSeconds * 3.2) * 0.025;
-      camera.position.x = visualX * 0.1 + (reducedMotion ? 0 : Math.sin(visualElapsedSeconds * 4.4) * 0.035);
-      camera.lookAt(visualX * 0.08, 0.4, -14);
+      const laneTracking = getCameraLaneTracking(camera.aspect);
+      const lookTracking = 0.08 + (laneTracking - 0.1) * 0.35;
+      camera.position.x = visualX * laneTracking + (reducedMotion ? 0 : Math.sin(visualElapsedSeconds * 4.4) * 0.035);
+      camera.lookAt(visualX * lookTracking, 0.4, -14);
       course.update(visualElapsedSeconds);
       renderer.render(scene, camera);
     },
@@ -231,6 +245,16 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
         drawCalls: renderer.info?.render.calls ?? 0,
         geometries: renderer.info?.memory.geometries ?? 0,
         textures: renderer.info?.memory.textures ?? 0,
+      };
+    },
+    getFramingDiagnostics() {
+      if (!glider) return { gliderNdcX: 0, gliderNdcY: 0, gliderVisible: false };
+      camera.updateMatrixWorld(true);
+      const projected = glider.mesh.getWorldPosition(new THREE.Vector3()).project(camera);
+      return {
+        gliderNdcX: projected.x,
+        gliderNdcY: projected.y,
+        gliderVisible: Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && projected.z >= -1 && projected.z <= 1,
       };
     },
     dispose() {

@@ -13,7 +13,7 @@ Game Three.js tĩnh luyện từ giản thể HSK 3.0 cấp 1–3. Mỗi lượt
 
 ## Chạy và kiểm thử
 
-Yêu cầu Node.js 22, npm và Chromium của Playwright:
+Yêu cầu Node.js 22, npm, Git và Chromium của Playwright:
 
 ```bash
 npm ci
@@ -45,8 +45,8 @@ npm run test:e2e
 
 | Ngữ cảnh | Samples | Median frame | Worst frame | Max draw calls | Max geometries | Max textures | Frame >50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Desktop Chrome, 1280×720 | 257 | 8.5 ms | 34.8 ms | 13 | 4 | 4 | 0 |
-| Pixel 7 emulation | 258 | 16.5 ms | 41.9 ms | 13 | 4 | 4 | 0 |
+| Desktop Chrome, 1280×720 | 238 | 8.4 ms | 42.2 ms | 13 | 4 | 4 | 0 |
+| Pixel 7 emulation | 257 | 9.8 ms | 33.7 ms | 13 | 4 | 4 | 0 |
 
 Đây là bằng chứng trên một máy, không phải cam kết FPS chung. Frame trên 50 ms lặp lại hoặc input/render lag kéo dài là blocker cần điều tra lại.
 

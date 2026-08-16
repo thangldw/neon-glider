@@ -1,14 +1,21 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 interface BrowserSnapshot {
   screen: 'menu' | 'countdown' | 'playing' | 'paused' | 'review' | 'fatal';
   run: null | {
+    schemaVersion: 1;
+    datasetVersion: 'hsk3-2026-08-16';
     seed: number;
+    rngState: number;
     level: 1 | 2 | 3;
     questionIds: string[];
     questionIndex: number;
     lane: 0 | 1 | 2;
+    score: number;
+    combo: number;
+    energy: number;
+    answers: Array<{ questionId: string; selectedId: string; correct: boolean }>;
     status: 'playing' | 'paused' | 'complete';
   };
   choices: null | readonly { id: string; term: string }[];
@@ -23,9 +30,17 @@ interface BrowserSnapshot {
     maxGeometries: number;
     maxTextures: number;
   };
+  framing: null | { gliderNdcX: number; gliderNdcY: number; gliderVisible: boolean };
 }
 
 const artifacts = '.superpowers/sdd/2026-08-16-hanzi-glider-implementation/task-8-artifacts/screenshots';
+const content = JSON.parse(readFileSync(new URL('../src/content/generated.json', import.meta.url), 'utf8')) as Array<{
+  id: string;
+  meaningsVi: string[];
+  level: 1 | 2 | 3;
+}>;
+const longestPromptEntry = content.find(({ id }) => id === 'hsk3-l2-8672');
+if (!longestPromptEntry) throw new Error('Missing pinned long-prompt content fixture');
 
 async function openGame(page: Page): Promise<void> {
   const failedRequests: string[] = [];
@@ -111,6 +126,28 @@ test('supports keyboard or touch lane input and pause countdown', async ({ page,
   await expect.poll(async () => (await snapshot(page)).screen, { timeout: 4_500 }).toBe('playing');
 });
 
+test('keeps the Pixel 7 glider visible in every lane', async ({ page, isMobile }, testInfo) => {
+  test.skip(!isMobile);
+  await openGame(page);
+  await page.getByRole('button', { name: 'HSK 1', exact: true }).click();
+  const viewport = page.locator('[data-game-viewport]');
+  const bounds = await viewport.boundingBox();
+  if (!bounds) throw new Error('Gameplay viewport has no bounds');
+  const tapLeft = () => page.touchscreen.tap(bounds.x + 8, bounds.y + bounds.height / 2);
+  const tapRight = () => page.touchscreen.tap(bounds.x + bounds.width - 8, bounds.y + bounds.height / 2);
+
+  await tapLeft();
+  for (const lane of [0, 1, 2] as const) {
+    if (lane === 1) await tapRight();
+    if (lane === 2) await tapRight();
+    await expect.poll(async () => {
+      const state = await snapshot(page);
+      return state.run?.lane === lane && state.framing?.gliderVisible && Math.abs(state.framing.gliderNdcX) < 0.9;
+    }).toBe(true);
+    await screenshot(page, testInfo.project.name, `lane-${lane}`);
+  }
+});
+
 test('reload restores the exact HSK 2 run after a three-second countdown', async ({ page }, testInfo) => {
   await openGame(page);
   await page.getByRole('button', { name: 'HSK 2', exact: true }).click();
@@ -119,20 +156,73 @@ test('reload restores the exact HSK 2 run after a three-second countdown', async
   expect(await answer(page, wrong.id)).toBe(true);
   await page.locator('[data-game-viewport]').press('ArrowRight');
   const before = await snapshot(page);
+  await expect.poll(async () => {
+    const persisted = await page.evaluate(() => JSON.parse(sessionStorage.getItem('hanzi-glider.run') ?? 'null'));
+    return persisted?.lane;
+  }).toBe(before.run!.lane);
+  const persistedBefore = await page.evaluate(() => JSON.parse(sessionStorage.getItem('hanzi-glider.run') ?? 'null'));
+  expect(persistedBefore).toEqual(before.run);
 
   await page.reload();
-  await expect(page.locator('[data-screen="countdown"]')).toContainText('3');
+  const countdown = page.locator('[data-screen="countdown"]');
+  await expect(countdown).toContainText('3');
   await screenshot(page, testInfo.project.name, 'reload-countdown');
-  const restored = await snapshot(page);
-  expect(restored.run).toMatchObject({
-    seed: before.run!.seed,
-    questionIds: before.run!.questionIds,
-    questionIndex: before.run!.questionIndex,
-    lane: before.run!.lane,
-    status: 'paused',
-  });
+  expect((await snapshot(page)).run).toEqual({ ...before.run!, status: 'paused' });
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('hanzi-glider.run') ?? 'null')))
+    .toEqual({ ...persistedBefore, status: 'paused' });
+  await expect(countdown).toContainText('2', { timeout: 1_500 });
+  expect((await snapshot(page)).run).toEqual({ ...before.run!, status: 'paused' });
+  await expect(countdown).toContainText('1', { timeout: 1_500 });
+  expect((await snapshot(page)).run).toEqual({ ...before.run!, status: 'paused' });
   await expect.poll(async () => (await snapshot(page)).screen, { timeout: 4_500 }).toBe('playing');
+  expect((await snapshot(page)).run).toEqual(before.run);
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('hanzi-glider.run') ?? 'null'))).toEqual(persistedBefore);
   await screenshot(page, testInfo.project.name, 'gameplay');
+});
+
+test('shows the complete longest pinned Vietnamese prompt without clipping', async ({ page }, testInfo) => {
+  const remainingIds = content.filter(({ level, id }) => level === 2 && id !== longestPromptEntry.id).slice(0, 19).map(({ id }) => id);
+  await page.addInitScript(({ questionIds }) => {
+    sessionStorage.setItem('hanzi-glider.run', JSON.stringify({
+      schemaVersion: 1,
+      datasetVersion: 'hsk3-2026-08-16',
+      seed: 1,
+      rngState: 2,
+      level: 2,
+      questionIds,
+      questionIndex: 0,
+      lane: 1,
+      score: 0,
+      combo: 0,
+      energy: 50,
+      answers: [],
+      status: 'playing',
+    }));
+  }, { questionIds: [longestPromptEntry.id, ...remainingIds] });
+  await page.goto('?e2e=1');
+  await expect(page.locator('[data-screen="countdown"]')).toBeVisible();
+  await expect.poll(async () => (await snapshot(page)).screen, { timeout: 4_500 }).toBe('playing');
+
+  const expected = longestPromptEntry.meaningsVi.join('; ');
+  const prompt = page.locator('[data-prompt]');
+  await expect(prompt).toHaveText(expected);
+  const layout = await prompt.evaluate((node) => {
+    const bounds = node.getBoundingClientRect();
+    return {
+      clientWidth: node.clientWidth,
+      clientHeight: node.clientHeight,
+      scrollWidth: node.scrollWidth,
+      scrollHeight: node.scrollHeight,
+      bottom: bounds.bottom,
+      viewportHeight: innerHeight,
+      pageOverflow: document.documentElement.scrollWidth > innerWidth,
+    };
+  });
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(layout.scrollHeight).toBeLessThanOrEqual(layout.clientHeight + 1);
+  expect(layout.bottom).toBeLessThan(layout.viewportHeight * 0.4);
+  expect(layout.pageOverflow).toBe(false);
+  await screenshot(page, testInfo.project.name, 'long-prompt');
 });
 
 test('completes exactly 20 questions and shows detailed mistake review with renderer evidence', async ({ page }, testInfo) => {
