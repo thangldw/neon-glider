@@ -2,12 +2,12 @@
 
 ## Summary
 
-Hanzi Glider is a lightweight Three.js browser game for practicing simplified Chinese characters and words from HSK 3.0 levels 1–3 using the 2026 trial syllabus. Each 3–5 minute run combines a three-lane arcade flight loop with multiple-choice recognition. The game runs entirely as static files on GitHub Pages and requires no backend.
+Hanzi Glider is a lightweight Three.js browser game for practicing simplified Chinese characters and words from HSK 3.0 levels 1–3 using the official 2026 syllabus. Each 3–5 minute run combines a three-lane arcade flight loop with multiple-choice recognition. The game runs entirely as static files on GitHub Pages and requires no backend.
 
 ## Goals
 
 - Make short HSK review sessions enjoyable without obscuring the learning task.
-- Support simplified terms from HSK 3.0 levels 1, 2, and 3 in the 2026 trial syllabus.
+- Support simplified terms from HSK 3.0 levels 1, 2, and 3 in the official 2026 syllabus.
 - Resume an active run after a page reload.
 - Start a new run when a new browser page session begins.
 - Preserve learning progress across browser sessions.
@@ -22,7 +22,7 @@ Hanzi Glider is a lightweight Three.js browser game for practicing simplified Ch
 
 ## Learning Content
 
-The initial dataset uses levels 1–3 from the official HSK 3.0 examination syllabus published for the 2026 global trial. As of 2026-08-16, HSK 3.0 is still identified by Chinese Testing International as a trial; the UI and dataset metadata must say `HSK 3.0 · 2026 Trial` rather than imply this is the settled regular-exam list.
+The initial dataset uses levels 1–3 from the official HSK 3.0 examination syllabus published by Chinese Testing International for 2026. The syllabus and its vocabulary classification are treated as the authoritative content source. Exam scheduling or rollout status is separate operational metadata and must not appear in the game's content label.
 
 The source snapshot is the 406-page official syllabus PDF retrieved on 2026-08-16. Its SHA-256 is `ec74ce0439e837bbb15154be13e747ae798903b2fd3a331629df6c3b45504941`. Only entries explicitly assigned to levels 1–3 are imported. Items may contain one or more simplified Chinese characters; the game does not invent an HSK level for individual characters extracted from a multi-character word.
 
@@ -39,12 +39,11 @@ interface HanziEntry {
 }
 ```
 
-The dataset manifest records `datasetVersion: "hsk3-trial-2026-08-16"`, source URL, retrieval date, source hash, importer version, and entry counts by level. Vietnamese meanings require human review before release. Generated or inferred vocabulary must not be silently presented as authoritative HSK content.
+The dataset manifest records `datasetVersion: "hsk3-2026-08-16"`, source URL, retrieval date, source hash, importer version, and entry counts by level. Vietnamese meanings require human review before release. Generated or inferred vocabulary must not be silently presented as authoritative HSK content.
 
 References:
 
 - [Official HSK 3.0 2026 examination syllabus](https://hsk.cn-bj.ufileos.com/3.0/%E6%96%B0%E7%89%88HSK%E8%80%83%E8%AF%95%E5%A4%A7%E7%BA%B21219.pdf).
-- [Official announcement for the second global HSK 3.0 trial on 2026-09-20](https://www.chinesetest.cn/notice).
 - [Official standards query for characters and vocabulary](https://admin.chinesetest.cn/standardsAction.do?means=standardInfo).
 
 ## Core Gameplay
@@ -176,7 +175,7 @@ The machine must have Node.js, Git, repository push access, and installed locked
 - The production build loads from a GitHub Pages repository subpath without missing assets.
 - A player can select HSK 3.0 level 1, 2, or 3 and complete a 20-question run.
 - Every question offers exactly one correct simplified HSK term and two valid distractors.
-- The UI labels the content `HSK 3.0 · 2026 Trial`, and the built dataset manifest matches the pinned source hash and per-level entry counts.
+- The UI labels the content `HSK 3.0 · 2026`, and the built dataset manifest matches the pinned source hash and per-level entry counts.
 - Reloading during a run resumes the same deterministic state after a countdown.
 - Opening with no compatible page-session state starts a new run.
 - Learning progress remains available across new browser sessions when storage is permitted.

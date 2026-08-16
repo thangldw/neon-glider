@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a lightweight Three.js lane-flight game that drills simplified HSK 3.0 levels 1–3 vocabulary from the pinned 2026 trial syllabus, resumes after reload, and deploys manually to GitHub Pages.
+**Goal:** Build a lightweight Three.js lane-flight game that drills simplified HSK 3.0 levels 1–3 vocabulary from the pinned official 2026 syllabus, resumes after reload, and deploys manually to GitHub Pages.
 
 **Architecture:** A pure TypeScript simulation owns questions, scoring, mastery, and serializable run state. Three.js renders primitive geometry from simulation snapshots, while DOM components render menus, prompts, HUD, and review screens. A build-time content pipeline snapshots the official HSK source, merges human-reviewed Vietnamese meanings, validates provenance, and emits static JSON.
 
@@ -11,9 +11,9 @@
 ## Global Constraints
 
 - Static frontend only; no backend, accounts, cloud synchronization, multiplayer, or global leaderboard.
-- Content label: `HSK 3.0 · 2026 Trial`.
+- Content label: `HSK 3.0 · 2026`.
 - Source syllabus SHA-256: `ec74ce0439e837bbb15154be13e747ae798903b2fd3a331629df6c3b45504941`.
-- Dataset version: `hsk3-trial-2026-08-16`.
+- Dataset version: `hsk3-2026-08-16`.
 - Levels: HSK 3.0 levels 1, 2, and 3 only; simplified terms may contain one or more characters.
 - One run contains 20 questions and targets a 3–5 minute session.
 - `sessionStorage` owns the active run; `localStorage` owns mastery, scores, and settings.
@@ -38,8 +38,8 @@ README.md                           local run, content refresh, and manual deplo
 scripts/fetch-hsk3.mts              official-source snapshot fetcher
 scripts/build-content.mts           reviewed translation merger and manifest builder
 scripts/verify-content.mts          release content gate
-content/source/hsk3-trial-2026.json normalized official source snapshot
-content/review/hsk3-trial-2026.vi.csv human-reviewed Vietnamese meanings
+content/source/hsk3-2026.json normalized official source snapshot
+content/review/hsk3-2026.vi.csv human-reviewed Vietnamese meanings
 src/content/types.ts                content and manifest contracts
 src/content/validate.ts             runtime/build validation
 src/content/generated.json          built static content pack
@@ -212,11 +212,11 @@ git commit -m "build: scaffold Hanzi Glider frontend"
 - Create: `scripts/fetch-hsk3.mts`
 - Create: `tests/fixtures/hsk-page.html`
 - Test: `tests/content/fetch-hsk3.test.ts`
-- Generate: `content/source/hsk3-trial-2026.json`
+- Generate: `content/source/hsk3-2026.json`
 
 **Interfaces:**
 - Produces: `HskLevel`, `SourceTerm`, `SourceSnapshot`, and `parseTermsPage(html, level)`.
-- Produces: deterministic `content/source/hsk3-trial-2026.json` consumed by Task 3.
+- Produces: deterministic `content/source/hsk3-2026.json` consumed by Task 3.
 
 - [ ] **Step 1: Define exact source contracts**
 
@@ -237,8 +237,8 @@ export interface HanziEntry extends SourceTerm {
 }
 
 export interface SourceSnapshot {
-  datasetVersion: 'hsk3-trial-2026-08-16';
-  label: 'HSK 3.0 · 2026 Trial';
+  datasetVersion: 'hsk3-2026-08-16';
+  label: 'HSK 3.0 · 2026';
   syllabusUrl: string;
   syllabusSha256: string;
   retrievedAt: '2026-08-16';
@@ -345,8 +345,8 @@ async function fetchSource(): Promise<SourceSnapshot> {
   if (hash !== EXPECTED_HASH) throw new Error(`Syllabus hash changed: ${hash}`);
 
   return {
-    datasetVersion: 'hsk3-trial-2026-08-16',
-    label: 'HSK 3.0 · 2026 Trial',
+    datasetVersion: 'hsk3-2026-08-16',
+    label: 'HSK 3.0 · 2026',
     syllabusUrl: SYLLABUS_URL,
     syllabusSha256: hash,
     retrievedAt: '2026-08-16',
@@ -357,7 +357,7 @@ async function fetchSource(): Promise<SourceSnapshot> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const snapshot = await fetchSource();
   await mkdir('content/source', { recursive: true });
-  await writeFile('content/source/hsk3-trial-2026.json', `${JSON.stringify(snapshot, null, 2)}\n`);
+  await writeFile('content/source/hsk3-2026.json', `${JSON.stringify(snapshot, null, 2)}\n`);
 }
 ```
 
@@ -375,8 +375,8 @@ Expected: parser test PASS; snapshot contains only levels 1–3, non-empty terms
 - [ ] **Step 6: Commit source ingestion**
 
 ```bash
-git add src/content/types.ts scripts/fetch-hsk3.mts tests/fixtures/hsk-page.html tests/content/fetch-hsk3.test.ts content/source/hsk3-trial-2026.json
-git commit -m "feat: ingest HSK 3.0 trial vocabulary"
+git add src/content/types.ts scripts/fetch-hsk3.mts tests/fixtures/hsk-page.html tests/content/fetch-hsk3.test.ts content/source/hsk3-2026.json
+git commit -m "feat: ingest official HSK 3.0 vocabulary"
 ```
 
 ---
@@ -384,7 +384,7 @@ git commit -m "feat: ingest HSK 3.0 trial vocabulary"
 ### Task 3: Reviewed Vietnamese Content Pack and Release Gate
 
 **Files:**
-- Create: `content/review/hsk3-trial-2026.vi.csv`
+- Create: `content/review/hsk3-2026.vi.csv`
 - Create: `src/content/validate.ts`
 - Create: `scripts/build-content.mts`
 - Create: `scripts/verify-content.mts`
@@ -398,7 +398,7 @@ git commit -m "feat: ingest HSK 3.0 trial vocabulary"
 
 - [ ] **Step 1: Define the review CSV contract**
 
-The first line of `content/review/hsk3-trial-2026.vi.csv` is exact:
+The first line of `content/review/hsk3-2026.vi.csv` is exact:
 
 ```csv
 id,meaningsVi,reviewedBy,reviewedAt
@@ -452,7 +452,7 @@ export function validateEntries(entries: HanziEntry[]): string[] {
 
 `scripts/build-content.mts` must:
 
-1. Read `content/source/hsk3-trial-2026.json`.
+1. Read `content/source/hsk3-2026.json`.
 2. Parse CSV with `parse` from `csv-parse/sync` using `{ columns: true, bom: true, skip_empty_lines: true }`; do not split raw lines on commas.
 3. Require exactly one review row per source ID.
 4. Require non-empty `reviewedBy` and valid `reviewedAt`.
@@ -530,7 +530,7 @@ export interface MasteryRecord {
 
 export interface ProgressState {
   schemaVersion: 1;
-  datasetVersion: 'hsk3-trial-2026-08-16';
+  datasetVersion: 'hsk3-2026-08-16';
   mastery: Record<string, MasteryRecord>;
   highScores: Record<HskLevel, number>;
   selectedLevel: HskLevel;
@@ -546,7 +546,7 @@ export interface AnswerRecord {
 
 export interface RunState {
   schemaVersion: 1;
-  datasetVersion: 'hsk3-trial-2026-08-16';
+  datasetVersion: 'hsk3-2026-08-16';
   seed: number;
   rngState: number;
   level: HskLevel;
@@ -629,7 +629,7 @@ import { answerCurrent, moveLane } from '../../src/simulation/run';
 
 const run = {
   schemaVersion: 1 as const,
-  datasetVersion: 'hsk3-trial-2026-08-16' as const,
+  datasetVersion: 'hsk3-2026-08-16' as const,
   seed: 9,
   rngState: 9,
   level: 1 as const,
@@ -692,7 +692,7 @@ beforeEach(() => sessionStorage.clear());
 it('round-trips a compatible active run', () => {
   const run = {
     schemaVersion: 1 as const,
-    datasetVersion: 'hsk3-trial-2026-08-16' as const,
+    datasetVersion: 'hsk3-2026-08-16' as const,
     seed: 1, rngState: 2, level: 1 as const,
     questionIds: Array.from({ length: 20 }, (_, index) => `q${index + 1}`), questionIndex: 0, lane: 1 as const,
     score: 0, combo: 0, energy: 50, answers: [], status: 'playing' as const,
@@ -720,7 +720,7 @@ function isRunState(value: unknown): value is RunState {
   if (!value || typeof value !== 'object') return false;
   const run = value as Partial<RunState>;
   return run.schemaVersion === 1
-    && run.datasetVersion === 'hsk3-trial-2026-08-16'
+    && run.datasetVersion === 'hsk3-2026-08-16'
     && Number.isInteger(run.seed)
     && Number.isInteger(run.rngState)
     && [1, 2, 3].includes(run.level ?? 0)
@@ -898,11 +898,11 @@ git commit -m "feat: render lightweight Three.js lane course"
 import { expect, it, vi } from 'vitest';
 import { createAppController } from '../../src/ui/app-controller';
 
-it('labels the trial dataset and starts the selected level', () => {
+it('labels the official 2026 dataset and starts the selected level', () => {
   const root = document.createElement('main');
   const startRun = vi.fn();
   const app = createAppController(root, { startRun, restoredRun: null });
-  expect(root.textContent).toContain('HSK 3.0 · 2026 Trial');
+  expect(root.textContent).toContain('HSK 3.0 · 2026');
   root.querySelector<HTMLButtonElement>('[data-level="2"]')?.click();
   expect(startRun).toHaveBeenCalledWith(2);
   app.destroy();
@@ -913,7 +913,7 @@ it('shows a three-second countdown before resuming', () => {
   const root = document.createElement('main');
   const restoredRun = {
     schemaVersion: 1 as const,
-    datasetVersion: 'hsk3-trial-2026-08-16' as const,
+    datasetVersion: 'hsk3-2026-08-16' as const,
     seed: 1, rngState: 2, level: 1 as const,
     questionIds: ['a'], questionIndex: 0, lane: 1 as const,
     score: 0, combo: 0, energy: 50, answers: [], status: 'playing' as const,
@@ -931,7 +931,7 @@ it('shows a three-second countdown before resuming', () => {
 
 `screens.ts` creates these surfaces with semantic HTML and stable selectors:
 
-- Menu: title, `HSK 3.0 · 2026 Trial`, three level buttons, reduced-motion toggle.
+- Menu: title, `HSK 3.0 · 2026`, three level buttons, reduced-motion toggle.
 - HUD: Vietnamese or pinyin prompt, score, combo, energy, progress `current / 20`, pause.
 - Countdown: `3`, `2`, `1` without advancing simulation.
 - Review: incorrect term, pinyin, Vietnamese meanings, selected answer, restart/menu actions.
@@ -1033,7 +1033,7 @@ import { expect, test } from '@playwright/test';
 
 test('selects HSK 2 and restores the same run after reload', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText('HSK 3.0 · 2026 Trial')).toBeVisible();
+  await expect(page.getByText('HSK 3.0 · 2026')).toBeVisible();
   await page.getByRole('button', { name: /HSK 2/i }).click();
   const runBefore = await page.evaluate(() => JSON.parse(sessionStorage.getItem('hanzi-glider.run') ?? 'null'));
   expect(runBefore).toBeTruthy();
@@ -1088,7 +1088,7 @@ npm run test:e2e
 npm run deploy
 ```
 
-Also document GitHub repository Settings → Pages → Deploy from branch → `gh-pages` / root, required Git push access, the pinned HSK source and trial label, content review gate, storage semantics, and the browser-session restoration limitation.
+Also document GitHub repository Settings → Pages → Deploy from branch → `gh-pages` / root, required Git push access, the pinned official HSK source and content label, content review gate, storage semantics, and the browser-session restoration limitation.
 
 - [ ] **Step 6: Run the complete release gate**
 
