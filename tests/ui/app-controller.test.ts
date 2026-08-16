@@ -3,6 +3,7 @@ import { loadContent } from '../../src/content';
 import type { HanziEntry } from '../../src/content/types';
 import { bindActions } from '../../src/input/actions';
 import type { GameView, GameViewOptions } from '../../src/render/game-view';
+import type { PerfMonitor } from '../../src/diagnostics/perf-overlay';
 import { createRun } from '../../src/simulation/run';
 import type { ProgressState, RunState } from '../../src/simulation/types';
 import {
@@ -147,6 +148,24 @@ function dependencies(overrides: Partial<AppControllerDependencies> = {}): AppCo
   };
 }
 
+function perfFixture() {
+  return {
+    record: vi.fn<PerfMonitor['record']>(),
+    reset: vi.fn<PerfMonitor['reset']>(),
+    snapshot: () => ({
+      sampleCount: 0,
+      medianFrameTimeMs: 0,
+      worstFrameTimeMs: 0,
+      slowFrameCount: 0,
+      longestSlowFrameStreak: 0,
+      maxDrawCalls: 0,
+      maxGeometries: 0,
+      maxTextures: 0,
+    }),
+    dispose: vi.fn<PerfMonitor['dispose']>(),
+  };
+}
+
 beforeEach(() => {
   document.body.innerHTML = '';
 });
@@ -198,6 +217,17 @@ describe('menu and run setup', () => {
     app.destroy();
   });
 
+  it('hides the draft warning when generated release metadata is fully reviewed', () => {
+    const app = createAppController(document.createElement('main'), dependencies({
+      loadContentReleaseState: () => ({ reviewStatus: 'reviewed', releaseReady: true }),
+    }));
+
+    expect(app.root.textContent).toContain('HSK 3.0 · 2026');
+    expect(app.root.querySelector('[data-content-notice]')).toBeNull();
+    expect(app.root.textContent).not.toContain('Nghĩa tiếng Việt đang chờ duyệt');
+    app.destroy();
+  });
+
   it('persists the reduced-motion preference from the menu', () => {
     const saveProgress = vi.fn(() => true);
     const app = createAppController(document.createElement('main'), dependencies({ saveProgress }));
@@ -226,7 +256,9 @@ describe('menu and run setup', () => {
   });
 
   it('uses deterministic level-specific reading time and distractor similarity', () => {
-    expect([getQuestionDurationMs(1), getQuestionDurationMs(2), getQuestionDurationMs(3)]).toEqual([5_400, 4_800, 4_200]);
+    const durations = [getQuestionDurationMs(1), getQuestionDurationMs(2), getQuestionDurationMs(3)];
+    expect(durations).toEqual([12_000, 10_500, 9_000]);
+    expect(durations.map((duration) => duration * 20)).toEqual([240_000, 210_000, 180_000]);
     const correct = { id: 'a', term: '学习', pinyin: 'xuexi', meaningsVi: ['học'], level: 1 as const, sourceOrder: 1 };
     const sameLength = { ...correct, id: 'b', term: '天气', sourceOrder: 2 };
     const shared = { ...correct, id: 'c', term: '学生', sourceOrder: 3 };
@@ -463,6 +495,50 @@ describe('answers and completion', () => {
     app.root.querySelector<HTMLButtonElement>('[data-action="menu"]')!.click();
     expect(clearRun).toHaveBeenCalledOnce();
     expect(app.getState().screen).toBe('menu');
+    app.destroy();
+  });
+});
+
+describe('performance diagnostics policy', () => {
+  it('does not create or sample a monitor when production diagnostics are disabled', () => {
+    const frames = frameHarness();
+    const createMonitor = vi.fn(() => perfFixture());
+    const app = createAppController(document.createElement('main'), dependencies({
+      enableDiagnostics: false,
+      createPerfMonitor: createMonitor,
+      requestFrame: (callback) => frames.requestFrame(callback),
+    }));
+
+    app.root.querySelector<HTMLButtonElement>('[data-level="1"]')!.click();
+    frames.gap(0);
+    frames.advance(200);
+
+    expect(createMonitor).not.toHaveBeenCalled();
+    app.destroy();
+  });
+
+  it('samples only under an explicit diagnostics flag and resets each run boundary', () => {
+    const frames = frameHarness();
+    const monitor = perfFixture();
+    const createMonitor = vi.fn(() => monitor);
+    const app = createAppController(document.createElement('main'), dependencies({
+      enableDiagnostics: true,
+      createPerfMonitor: createMonitor,
+      requestFrame: (callback) => frames.requestFrame(callback),
+    }));
+
+    app.root.querySelector<HTMLButtonElement>('[data-level="1"]')!.click();
+    frames.gap(0);
+    frames.advance(100);
+
+    expect(createMonitor).toHaveBeenCalledOnce();
+    expect(monitor.reset).toHaveBeenCalledOnce();
+    expect(monitor.record).toHaveBeenCalled();
+
+    app.root.querySelector<HTMLButtonElement>('[data-action="pause"]')!.click();
+    app.root.querySelector<HTMLButtonElement>('[data-action="menu"]')!.click();
+    app.root.querySelector<HTMLButtonElement>('[data-level="2"]')!.click();
+    expect(monitor.reset).toHaveBeenCalledTimes(2);
     app.destroy();
   });
 });

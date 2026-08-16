@@ -1,7 +1,10 @@
-import { loadContent as loadBuiltContent } from '../content';
-import type { HanziEntry, HskLevel } from '../content/types';
 import {
-  createPerfMonitor,
+  loadContent as loadBuiltContent,
+  loadContentReleaseState as loadBuiltContentReleaseState,
+} from '../content';
+import type { ContentReleaseState, HanziEntry, HskLevel } from '../content/types';
+import {
+  createPerfMonitor as createPerformanceMonitor,
   type PerformanceSnapshot,
   type PerfMonitor,
 } from '../diagnostics/perf-overlay';
@@ -45,6 +48,7 @@ type StorageUnavailableHandler = () => void;
 
 export interface AppControllerDependencies {
   loadContent?: () => HanziEntry[];
+  loadContentReleaseState?: () => ContentReleaseState;
   loadProgress?: (onUnavailable: StorageUnavailableHandler) => ProgressState;
   saveProgress?: (progress: ProgressState, onUnavailable: StorageUnavailableHandler) => boolean;
   loadRun?: (onUnavailable: StorageUnavailableHandler) => RunState | null;
@@ -61,6 +65,8 @@ export interface AppControllerDependencies {
   prefersReducedMotion?: () => boolean;
   questionDurationMs?: number;
   enableTestHooks?: boolean;
+  enableDiagnostics?: boolean;
+  createPerfMonitor?: typeof createPerformanceMonitor;
   perfMonitor?: PerfMonitor;
 }
 
@@ -80,7 +86,21 @@ export interface AppController {
 export interface AppTestSnapshot extends AppControllerState {
   performance: PerformanceSnapshot;
   reducedMotion: boolean;
+  questionDurationMs: number;
   framing: FramingDiagnostics | null;
+}
+
+function emptyPerformanceSnapshot(): PerformanceSnapshot {
+  return {
+    sampleCount: 0,
+    medianFrameTimeMs: 0,
+    worstFrameTimeMs: 0,
+    slowFrameCount: 0,
+    longestSlowFrameStreak: 0,
+    maxDrawCalls: 0,
+    maxGeometries: 0,
+    maxTextures: 0,
+  };
 }
 
 export interface AppTestHook {
@@ -90,7 +110,7 @@ export interface AppTestHook {
 }
 
 const COUNTDOWN_SECONDS = 3;
-const QUESTION_DURATION_MS: Readonly<Record<HskLevel, number>> = { 1: 5_400, 2: 4_800, 3: 4_200 };
+const QUESTION_DURATION_MS: Readonly<Record<HskLevel, number>> = { 1: 12_000, 2: 10_500, 3: 9_000 };
 
 /** Higher levels get less reading time without changing glider physics. */
 export function getQuestionDurationMs(level: HskLevel): number {
@@ -226,6 +246,7 @@ export function createAppController(
   dependencies: AppControllerDependencies = {},
 ): AppController {
   const loadEntries = dependencies.loadContent ?? loadBuiltContent;
+  const loadContentReleaseState = dependencies.loadContentReleaseState ?? loadBuiltContentReleaseState;
   const loadProgress = dependencies.loadProgress ?? safeBrowserProgress;
   const saveProgress = dependencies.saveProgress ?? safeSaveProgress;
   const loadRun = dependencies.loadRun ?? safeBrowserRun;
@@ -240,18 +261,27 @@ export function createAppController(
   const prefersReducedMotion = dependencies.prefersReducedMotion
     ?? (() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const questionDurationMs = () => dependencies.questionDurationMs ?? getQuestionDurationMs(run?.level ?? progress.selectedLevel);
-  const perfMonitor = dependencies.perfMonitor ?? createPerfMonitor({
-    visible: import.meta.env.DEV && import.meta.env.MODE !== 'test',
-    host: document.body,
-  });
+  const query = new URLSearchParams(window.location.search);
   const enableTestHooks = dependencies.enableTestHooks
-    ?? new URLSearchParams(window.location.search).get('e2e') === '1';
+    ?? query.get('e2e') === '1';
+  const developmentDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== 'test';
+  const explicitDiagnostics = query.get('diagnostics') === '1';
+  const enableDiagnostics = dependencies.enableDiagnostics
+    ?? (developmentDiagnostics || explicitDiagnostics || enableTestHooks);
+  const perfMonitor = dependencies.perfMonitor
+    ?? (enableDiagnostics
+      ? (dependencies.createPerfMonitor ?? createPerformanceMonitor)({
+        visible: developmentDiagnostics || explicitDiagnostics,
+        host: document.body,
+      })
+      : null);
 
   let screen: AppScreen = 'menu';
   let run: RunState | null = null;
   let choices: [GateChoice, GateChoice, GateChoice] | null = null;
   let progress = createDefaultProgress();
   let entries: HanziEntry[] = [];
+  let contentReleaseState: ContentReleaseState = { reviewStatus: 'draft', releaseReady: false };
   let entriesById = new Map<string, HanziEntry>();
   let gameScreen: GameScreen | null = null;
   let gameView: GameView | null = null;
@@ -326,6 +356,7 @@ export function createAppController(
     const menu = createMenuScreen({
       selectedLevel: progress.selectedLevel,
       reducedMotion: progress.reducedMotion,
+      contentReleaseState,
       onStart: (level) => startSelectedLevel(level),
       onReducedMotion: (enabled) => {
         progress = { ...progress, reducedMotion: enabled };
@@ -353,7 +384,7 @@ export function createAppController(
     if (destroyed || !gameView) return;
     const elapsedSeconds = timestamp / 1_000;
     gameView.render(elapsedSeconds);
-    perfMonitor.record(timestamp, gameView.getDiagnostics?.() ?? { drawCalls: 0, geometries: 0, textures: 0 });
+    perfMonitor?.record(timestamp, gameView.getDiagnostics?.() ?? { drawCalls: 0, geometries: 0, textures: 0 });
     if (screen === 'playing') {
       const delta = frameAnchorSeconds === null ? 0 : elapsedSeconds - frameAnchorSeconds;
       frameAnchorSeconds = elapsedSeconds;
@@ -554,6 +585,7 @@ export function createAppController(
       persistProgress();
       run = suppliedRun ?? createSimulationRun(entries, progress.mastery, level, createSeed(), now());
       choices = createGateChoices(run, entries, entriesById);
+      perfMonitor?.reset();
       if (!mountGameplay()) return;
       enterPlaying();
     } catch {
@@ -580,6 +612,7 @@ export function createAppController(
 
   try {
     entries = loadEntries();
+    contentReleaseState = loadContentReleaseState();
     entriesById = new Map(entries.map((entry) => [entry.id, entry]));
     progress = loadProgress(showStorageWarning);
     const restored = Object.hasOwn(dependencies, 'restoredRun')
@@ -590,6 +623,7 @@ export function createAppController(
       if (run.status === 'complete') showReview();
       else {
         choices = createGateChoices(run, entries, entriesById);
+        perfMonitor?.reset();
         if (mountGameplay()) beginCountdown();
       }
     } else {
@@ -605,12 +639,13 @@ export function createAppController(
       screen,
       run,
       choices,
-      performance: perfMonitor.snapshot(),
+      performance: perfMonitor?.snapshot() ?? emptyPerformanceSnapshot(),
       reducedMotion: effectiveReducedMotion,
+      questionDurationMs: questionDurationMs(),
       framing: gameView?.getFramingDiagnostics?.() ?? null,
     }),
     answer: answerSelected,
-    resetPerformance: () => perfMonitor.reset(),
+    resetPerformance: () => perfMonitor?.reset(),
   } : undefined;
 
   return {
@@ -622,7 +657,7 @@ export function createAppController(
       destroyed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       stopGameplay();
-      perfMonitor.dispose();
+      perfMonitor?.dispose();
       root.replaceChildren();
     },
   };

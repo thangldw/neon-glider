@@ -1,4 +1,4 @@
-import type { HanziEntry, HskLevel } from '../content/types';
+import type { ContentReleaseState, HanziEntry, HskLevel } from '../content/types';
 import type { RunState } from '../simulation/types';
 
 export interface GateChoice {
@@ -23,6 +23,7 @@ function button(label: string, action: string): HTMLButtonElement {
 export function createMenuScreen(options: {
   selectedLevel: HskLevel;
   reducedMotion: boolean;
+  contentReleaseState: ContentReleaseState;
   onStart(level: HskLevel): void;
   onReducedMotion(enabled: boolean): void;
 }): HTMLElement {
@@ -38,8 +39,11 @@ export function createMenuScreen(options: {
   title.textContent = 'Hanzi Glider';
   const description = element('p', 'menu-copy');
   description.textContent = 'Chọn làn bay qua chữ Hán đúng. Mỗi lượt gồm 20 câu.';
-  const draftNotice = element('p', 'content-notice');
-  draftNotice.textContent = 'Nghĩa tiếng Việt đang chờ duyệt nội dung.';
+  const draftNotice = options.contentReleaseState.releaseReady ? null : element('p', 'content-notice');
+  if (draftNotice) {
+    draftNotice.dataset.contentNotice = '';
+    draftNotice.textContent = 'Nghĩa tiếng Việt đang chờ duyệt nội dung.';
+  }
 
   const levels = element('div', 'level-actions');
   levels.setAttribute('aria-label', 'Chọn cấp độ HSK');
@@ -59,7 +63,9 @@ export function createMenuScreen(options: {
   motion.addEventListener('change', () => options.onReducedMotion(motion.checked));
   motionLabel.append(motion, document.createTextNode(' Giảm chuyển động'));
 
-  screen.append(eyebrow, title, description, draftNotice, levels, motionLabel);
+  screen.append(eyebrow, title, description);
+  if (draftNotice) screen.append(draftNotice);
+  screen.append(levels, motionLabel);
   return screen;
 }
 

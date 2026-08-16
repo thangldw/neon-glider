@@ -19,6 +19,7 @@ interface BrowserSnapshot {
     status: 'playing' | 'paused' | 'complete';
   };
   choices: null | readonly { id: string; term: string }[];
+  questionDurationMs: number;
   reducedMotion: boolean;
   performance: {
     sampleCount: number;
@@ -91,6 +92,9 @@ for (const level of [1, 2, 3] as const) {
 
     expect(state).toMatchObject({ screen: 'playing', run: { level, questionIndex: 0 } });
     expect(state.run?.questionIds).toHaveLength(20);
+    expect(state.questionDurationMs).toBe(({ 1: 12_000, 2: 10_500, 3: 9_000 } as const)[level]);
+    expect(state.questionDurationMs * 20).toBeGreaterThanOrEqual(180_000);
+    expect(state.questionDurationMs * 20).toBeLessThanOrEqual(300_000);
     await expect(page.locator('[data-gate-term]')).toHaveCount(3);
     const canvas = page.locator('canvas');
     await expect(canvas).toBeVisible();

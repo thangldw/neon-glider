@@ -2,9 +2,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parse } from 'csv-parse/sync';
-import type { HanziEntry, SourceSnapshot } from '../src/content/types';
+import type { ContentManifest, HanziEntry, SourceSnapshot } from '../src/content/types';
 import { validateEntries } from '../src/content/validate';
-import { sourceSnapshotSha256 } from './provenance.mts';
+import { assertSourceSnapshotMetadata, sourceSnapshotSha256 } from './provenance.mts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SOURCE_PATH = resolve(ROOT, 'content/source/hsk3-2026.json');
@@ -21,24 +21,6 @@ interface ReviewRow {
   meaningsVi: string;
   reviewedBy: string;
   reviewedAt: string;
-}
-
-export interface ContentManifest {
-  datasetVersion: string;
-  label: string;
-  source: {
-    url: string;
-    sha256: string;
-    snapshotSha256: string;
-  };
-  importerVersion: string;
-  draftGenerator: string;
-  reviewDateRange: { from: string; to: string } | null;
-  entryCountsByLevel: Record<'1' | '2' | '3', number>;
-  reviewedCount: number;
-  draftCount: number;
-  reviewStatus: 'draft' | 'reviewed';
-  releaseReady: boolean;
 }
 
 export interface ContentBuild {
@@ -83,6 +65,7 @@ export async function rebuildContent(): Promise<ContentBuild> {
     readFile(REVIEW_PATH, 'utf8'),
   ]);
   const source = JSON.parse(sourceRaw) as SourceSnapshot;
+  assertSourceSnapshotMetadata(source);
   const rows = parseReviewCsv(reviewRaw);
   const rowsById = new Map<string, ReviewRow>();
   const errors: string[] = [];
@@ -151,8 +134,12 @@ export async function rebuildContent(): Promise<ContentBuild> {
     datasetVersion: source.datasetVersion,
     label: source.label,
     source: {
-      url: source.syllabusUrl,
-      sha256: source.syllabusSha256,
+      vocabularySourceUrl: source.vocabularySourceUrl,
+      retrievedAt: source.retrievedAt,
+      vocabularyImportMethod: source.vocabularyImportMethod,
+      vocabularyQuery: source.vocabularyQuery,
+      syllabusUrl: source.syllabusUrl,
+      syllabusSha256: source.syllabusSha256,
       snapshotSha256: sourceSnapshotSha256(Buffer.from(sourceRaw)),
     },
     importerVersion: IMPORTER_VERSION,

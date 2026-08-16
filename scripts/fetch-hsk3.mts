@@ -4,10 +4,11 @@ import { get } from 'node:https';
 import type { IncomingHttpHeaders } from 'node:http';
 import { load } from 'cheerio';
 import type { HskLevel, SourceSnapshot, SourceTerm } from '../src/content/types';
+import { SOURCE_METADATA } from './provenance.mts';
 
 const INFO_URL = 'https://admin.chinesetest.cn/standardsAction.do?means=standardInfo';
-const SYLLABUS_URL = 'https://hsk.cn-bj.ufileos.com/3.0/%E6%96%B0%E7%89%88HSK%E8%80%83%E8%AF%95%E5%A4%A7%E7%BA%B21219.pdf';
-const EXPECTED_HASH = 'ec74ce0439e837bbb15154be13e747ae798903b2fd3a331629df6c3b45504941';
+const SYLLABUS_URL = SOURCE_METADATA.syllabusUrl;
+const EXPECTED_HASH = SOURCE_METADATA.syllabusSha256;
 const LEVEL_NAMES: Record<HskLevel, string> = { 1: '一级', 2: '二级', 3: '三级' };
 const MAX_REQUEST_ATTEMPTS = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -206,11 +207,14 @@ async function fetchSource(): Promise<SourceSnapshot> {
   if (hash !== EXPECTED_HASH) throw new Error(`Syllabus hash changed: ${hash}`);
 
   return {
-    datasetVersion: 'hsk3-2026-08-16',
-    label: 'HSK 3.0 · 2026',
+    datasetVersion: SOURCE_METADATA.datasetVersion,
+    label: SOURCE_METADATA.label,
+    vocabularySourceUrl: SOURCE_METADATA.vocabularySourceUrl,
+    vocabularyImportMethod: SOURCE_METADATA.vocabularyImportMethod,
+    vocabularyQuery: SOURCE_METADATA.vocabularyQuery,
     syllabusUrl: SYLLABUS_URL,
     syllabusSha256: hash,
-    retrievedAt: '2026-08-16',
+    retrievedAt: SOURCE_METADATA.retrievedAt,
     terms,
   };
 }
