@@ -179,6 +179,19 @@ function latestGateZ(renderer: RendererLike): number {
   return scene.getObjectByName('gate-1')!.position.z;
 }
 
+function latestCoursePose(renderer: RendererLike): number[] {
+  const calls = (renderer.render as ReturnType<typeof vi.fn>).mock.calls;
+  const scene = calls.at(-1)![0] as THREE.Scene;
+  const obstacleZ = scene.children
+    .flatMap((node) => node.children)
+    .filter((node) => {
+      const material = (node as THREE.Mesh).material;
+      return material instanceof THREE.MeshBasicMaterial && material.wireframe;
+    })
+    .map((node) => node.position.z);
+  return [scene.getObjectByName('gate-1')!.position.z, obstacleZ[0], obstacleZ[3]];
+}
+
 it('anchors a reset before the first external frame at visual time zero', () => {
   const renderer = rendererFixture();
   const view = createGameView(containerFixture(), { createRenderer: () => renderer });
@@ -213,5 +226,22 @@ it('freezes local visual time across pauses, invalid frames, and context restore
   expect(latestGateZ(renderer)).toBe(beforePause);
   view.render(1_000.1);
   expect(latestGateZ(renderer)).toBeGreaterThan(beforePause);
+  view.dispose();
+});
+
+it('replays a positive-time gate reset exactly across context restoration', () => {
+  const renderer = rendererFixture();
+  const view = createGameView(containerFixture(), { createRenderer: () => renderer });
+  view.render(10);
+  view.render(10.2);
+  view.resetGatePhase();
+  view.render(10.3);
+  const beforeLoss = latestCoursePose(renderer);
+
+  renderer.domElement.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  renderer.domElement.dispatchEvent(new Event('webglcontextrestored'));
+  view.render(100);
+
+  expect(latestCoursePose(renderer)).toEqual(beforeLoss);
   view.dispose();
 });

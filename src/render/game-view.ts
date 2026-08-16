@@ -119,8 +119,11 @@ export function createGameView(container: HTMLElement, options: GameViewOptions 
     scene.add(keyLight);
     course = createCourse();
     scene.add(course.root);
+    if (gatePhaseStartVisualSeconds > 0) {
+      course.update(gatePhaseStartVisualSeconds);
+      course.resetGatePhase();
+    }
     course.update(visualElapsedSeconds);
-    if (gatePhaseStartVisualSeconds > 0) course.resetGatePhase();
     glider = createGlider();
     scene.add(glider.mesh);
     if (gateTerms) applyGateTerms(gateTerms);

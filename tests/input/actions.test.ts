@@ -164,6 +164,33 @@ it('ignores a second pointer so its up or cancellation cannot clear the active g
   dispose();
 });
 
+it('keeps the first legacy touch authoritative across a second start and non-active cancellation', () => {
+  const original = Object.getOwnPropertyDescriptor(window, 'PointerEvent');
+  Object.defineProperty(window, 'PointerEvent', { configurable: true, value: undefined });
+  try {
+    const element = document.createElement('div');
+    const handlers = actionHandlers();
+    const dispose = bindActions(element, handlers);
+    const touch = (identifier: number, x: number) => ({ identifier, clientX: x, clientY: 40 });
+    const event = (type: string, touches: object[], changedTouches: object[] = []) => {
+      const next = new Event(type, { cancelable: true });
+      Object.defineProperties(next, { touches: { value: touches }, changedTouches: { value: changedTouches } });
+      return next;
+    };
+    const first = touch(1, 160);
+    const second = touch(2, 160);
+    element.dispatchEvent(event('touchstart', [first]));
+    element.dispatchEvent(event('touchstart', [second, first]));
+    element.dispatchEvent(event('touchcancel', [first], [second]));
+    element.dispatchEvent(event('touchend', [], [touch(1, 90)]));
+    expect(handlers.left).toHaveBeenCalledOnce();
+    dispose();
+  } finally {
+    if (original) Object.defineProperty(window, 'PointerEvent', original);
+    else delete (window as Window & { PointerEvent?: unknown }).PointerEvent;
+  }
+});
+
 it('removes input listeners when disposed', () => {
   const handlers = actionHandlers();
   const dispose = bindActions(window, handlers);

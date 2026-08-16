@@ -99,6 +99,7 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
   const onLostPointerCapture = (event: PointerEvent) => releasePointerCapture(event.pointerId);
 
   const onTouchStart = (event: TouchEvent) => {
+    if (activeGesture) return;
     const touch = event.touches[0];
     if (touch) beginGesture(touch.identifier, touch.clientX, touch.clientY);
   };
@@ -114,6 +115,11 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
     const touch = Array.from(event.changedTouches).find(({ identifier }) => identifier === active.id);
     if (touch) finishGesture(touch.identifier, touch.clientX, touch.clientY);
   };
+  const onTouchCancel = (event: TouchEvent) => {
+    const active = activeGesture;
+    if (!active) return;
+    if (Array.from(event.changedTouches).some(({ identifier }) => identifier === active.id)) releaseGesture();
+  };
   const supportsPointerEvents = typeof window.PointerEvent === 'function';
 
   target.addEventListener('keydown', onKeyDown as EventListener);
@@ -128,7 +134,7 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
       target.addEventListener('touchstart', onTouchStart, { passive: true });
       target.addEventListener('touchmove', onTouchMove, { passive: false });
       target.addEventListener('touchend', onTouchEnd);
-      target.addEventListener('touchcancel', releaseGesture);
+      target.addEventListener('touchcancel', onTouchCancel);
     }
   }
 
@@ -148,7 +154,7 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
         target.removeEventListener('touchstart', onTouchStart);
         target.removeEventListener('touchmove', onTouchMove);
         target.removeEventListener('touchend', onTouchEnd);
-        target.removeEventListener('touchcancel', releaseGesture);
+        target.removeEventListener('touchcancel', onTouchCancel);
       }
       target.style.touchAction = priorTouchAction ?? '';
     }
