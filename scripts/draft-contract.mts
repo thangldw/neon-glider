@@ -29,13 +29,29 @@ export function createOrderedResponseSchema(count: number): object {
   };
 }
 
-export function createSingleMeaningSchema(): object {
+const PINYIN_LETTER_VARIANTS: Record<string, string> = {
+  a: '[aAàáảãạăằắẳẵặâầấẩẫậ]',
+  e: '[eEèéẻẽẹêềếểễệ]',
+  i: '[iIìíỉĩị]',
+  o: '[oOòóỏõọôồốổỗộơờớởỡợ]',
+  u: '[uUùúủũụưừứửữựüÜ]',
+  y: '[yYỳýỷỹỵ]',
+};
+
+function pinyinExcludingPattern(forbiddenPinyinTokens: string[]): string {
+  const alternatives = forbiddenPinyinTokens
+    .filter((token) => token.length >= 3)
+    .map((token) => [...token].map((letter) => PINYIN_LETTER_VARIANTS[letter] ?? `[${letter}${letter.toUpperCase()}]`).join(''));
+  return alternatives.length ? `^(?!.*(?:${alternatives.join('|')}))[^|]+$` : '^[^|]+$';
+}
+
+export function createSingleMeaningSchema(forbiddenPinyinTokens: string[] = []): object {
   return {
     type: 'object',
     additionalProperties: false,
     required: ['meaning'],
     properties: {
-      meaning: { type: 'string', minLength: 1, pattern: '^[^|]+$' },
+      meaning: { type: 'string', minLength: 1, pattern: pinyinExcludingPattern(forbiddenPinyinTokens) },
     },
   };
 }

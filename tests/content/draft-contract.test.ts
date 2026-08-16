@@ -61,6 +61,9 @@ describe('attachOrderedMeanings', () => {
       additionalProperties: false,
       properties: { meaning: { type: 'string', minLength: 1, pattern: '^[^|]+$' } },
     });
+    expect(createSingleMeaningSchema(['bao'])).toMatchObject({
+      properties: { meaning: { pattern: expect.stringContaining('b') } },
+    });
   });
 
   it('sanitizes a bounded plain-text fallback meaning', () => {

@@ -26,7 +26,6 @@ const REQUEST_INACTIVITY_TIMEOUT_MS = Number(process.env.HANZI_REPAIR_TIMEOUT_MS
 const REQUEST_HARD_TIMEOUT_MS = 180_000;
 const SINGLE_INACTIVITY_TIMEOUT_MS = 10_000;
 const SINGLE_HARD_TIMEOUT_MS = 60_000;
-const REPAIR_EXAMPLES = '能→có thể; 卡→thẻ; 可能→có khả năng; 满意→hài lòng; 能够→có thể; 全体→toàn thể; 什么样→loại nào; 体育→thể thao; 体育场→sân vận động; 外地→ngoại tỉnh; 信用卡→thẻ tín dụng; 银行卡→thẻ ngân hàng; 怎么样→như thế nào; 怎样→như thế nào; 只能→chỉ có thể; 福→phúc lành; 行→ngành nghề; 集体→tập thể; 具体→cụ thể; 世纪→thế kỷ; 世界→thế giới; 世界杯→giải vô địch thế giới; 幸运→may mắn; 优势→ưu thế; 整体→toàn thể; 制度→chế độ; 专门→chuyên môn; 作者→tác giả';
 
 function csvCell(value: string): string {
   return /[",\n\r]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
@@ -34,6 +33,12 @@ function csvCell(value: string): string {
 
 function cleanMeanings(raw: string, term: SourceTerm): string[] {
   return raw.split('|').map((meaning) => meaning.trim()).filter((meaning) => isVietnameseDraftMeaning(meaning, term));
+}
+
+function normalizedPinyinTokens(pinyin: string): string[] {
+  return [...new Set((pinyin.match(/\p{L}+/gu) ?? []).map((token) => (
+    token.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase()
+  )))];
 }
 
 async function readCheckpoint(sourceById: Map<string, SourceTerm>): Promise<RepairCheckpoint> {
@@ -74,7 +79,6 @@ async function translateBatch(
           'For every ordered Chinese term, return exactly one concise Vietnamese dictionary meaning.',
           'Vietnamese only: every meaning must contain at least one Vietnamese diacritic except a natural ASCII word such as hai; do not output Chinese, Japanese, Korean, English, pinyin, IDs, explanations, slash, or pipe characters.',
           'Examples: 房间→căn phòng; 放→đặt xuống; 飞→bay lượn; 高→ở trên; 给→đưa cho; 跟→cùng với; 网站→trang mạng; 二→hai.',
-          REPAIR_EXAMPLES,
           ...(strongerPrompt ? ['Every item must be one plain Vietnamese string in the flat meanings array; never emit nested arrays or prose.'] : []),
           'Return only JSON object {"meanings":["..."]} in the same order.',
           JSON.stringify(terms.map(({ term, pinyin }) => [term, pinyin])),
@@ -90,7 +94,27 @@ async function translateBatch(
   return partitionVietnameseRepairMeanings(parsed, terms);
 }
 
-async function generateSingle(term: SourceTerm, format: object | undefined): Promise<string> {
+type CandidateError = SemanticResponseError & { candidate?: string };
+
+function withRejectedCandidate(error: SemanticResponseError, content: string, format: object | undefined): CandidateError {
+  const candidate = format
+    ? (() => {
+      try {
+        const value = JSON.parse(content) as { meaning?: unknown };
+        return typeof value.meaning === 'string' ? value.meaning.trim() : undefined;
+      } catch {
+        return undefined;
+      }
+    })()
+    : content.trim().replace(/^['"`]+|['"`]+$/g, '').trim();
+  return Object.assign(error, candidate ? { candidate } : {});
+}
+
+async function generateSingle(term: SourceTerm, format: object | undefined, rejectedCandidates: string[] = []): Promise<string> {
+  const forbiddenPinyin = normalizedPinyinTokens(term.pinyin);
+  const rejected = rejectedCandidates.length
+    ? ` Previous invalid candidate(s): ${rejectedCandidates.map((candidate) => JSON.stringify(candidate)).join(', ')}. Do not repeat them; use another semantic sense.`
+    : '';
   const content = await postOllamaStream(`${OLLAMA_URL}/api/generate`, {
       model: MODEL,
       stream: true,
@@ -98,26 +122,40 @@ async function generateSingle(term: SourceTerm, format: object | undefined): Pro
       format,
       options: { temperature: 0, num_predict: 256 },
       prompt: format
-        ? `Return only JSON {"meaning":"..."} with one concise Vietnamese dictionary meaning containing Vietnamese diacritics for ${term.term} (${term.pinyin}). No Chinese, English, pinyin, slash, pipe, labels, or explanation.`
-        : `Return one concise Vietnamese dictionary meaning containing a Vietnamese diacritic only for ${term.term} (${term.pinyin}). No Chinese, English, pinyin, slash, pipe, labels, or explanation.`,
+        ? `Return only JSON {"meaning":"..."} with one concise Vietnamese dictionary meaning for ${term.term} (${term.pinyin}). Output style: 房间→căn phòng; 放→đặt xuống; 飞→bay lượn; 二→hai. For a grammatical particle or interjection, give its Vietnamese grammatical function, not a phonetic spelling. Do not use these normalized pinyin tokens: ${forbiddenPinyin.join(', ')}; choose a semantic synonym instead.${rejected} No Chinese, English, pinyin, slash, pipe, labels, or explanation.`
+        : `Return one concise Vietnamese dictionary meaning only for ${term.term} (${term.pinyin}). Output style: 房间→căn phòng; 放→đặt xuống; 飞→bay lượn; 二→hai. For a grammatical particle or interjection, give its Vietnamese grammatical function, not a phonetic spelling. Do not use these normalized pinyin tokens: ${forbiddenPinyin.join(', ')}; choose a semantic synonym instead.${rejected} No Chinese, English, pinyin, slash, pipe, labels, or explanation.`,
     }, SINGLE_INACTIVITY_TIMEOUT_MS, SINGLE_HARD_TIMEOUT_MS);
-  if (!format) return parsePlainMeaning(content, term);
+  if (!format) {
+    try {
+      return parsePlainMeaning(content, term);
+    } catch (error) {
+      if (error instanceof SemanticResponseError) throw withRejectedCandidate(error, content, format);
+      throw error;
+    }
+  }
   try {
     return parseSingleMeaning(JSON.parse(content), term);
   } catch (error) {
-    if (error instanceof SemanticResponseError) throw error;
+    if (error instanceof SemanticResponseError) throw withRejectedCandidate(error, content, format);
     throw new SemanticResponseError('Ollama response is not valid JSON');
   }
 }
 
 async function repairSingleFallback(term: SourceTerm): Promise<string> {
   let lastError: unknown;
-  for (const format of [createSingleMeaningSchema(), undefined]) {
-    try {
-      return await generateSingle(term, format);
-    } catch (error) {
-      lastError = error;
-      console.warn(`Repair single attempt: ${error instanceof Error ? error.name : typeof error}`);
+  const rejectedCandidates: string[] = [];
+  for (let round = 0; round < 3; round += 1) {
+    for (const format of [createSingleMeaningSchema(normalizedPinyinTokens(term.pinyin)), undefined]) {
+      try {
+        return await generateSingle(term, format, rejectedCandidates);
+      } catch (error) {
+        lastError = error;
+        if (error instanceof SemanticResponseError && (error as CandidateError).candidate) {
+          const candidate = (error as CandidateError).candidate!;
+          if (!rejectedCandidates.includes(candidate)) rejectedCandidates.push(candidate);
+        }
+        console.warn(`Repair single attempt for ${term.id}: ${error instanceof Error ? error.name : typeof error}`);
+      }
     }
   }
   throw lastError;
@@ -157,19 +195,25 @@ async function repairDrafts(): Promise<void> {
   const defer = (error: unknown, terms: SourceTerm[]) => {
     console.warn(`Deferring repair batch of ${terms.length}: ${error instanceof Error ? error.name : typeof error}`);
   };
-  const firstRound = await runRepairRound(pending, BATCH_SIZE, (terms) => translateBatch(terms), saveAccepted, defer);
-  const secondRound = await runRepairRound(firstRound, 5, (terms) => translateBatch(terms, true), saveAccepted, defer);
-  for (const term of secondRound) {
-    try {
-      const singleBatch = await translateBatch([term], true);
-      if (singleBatch.accepted[term.id]) {
-        await saveAccepted(singleBatch.accepted);
-        continue;
-      }
-    } catch (error) {
-      console.warn(`Deferring repair singleton: ${error instanceof Error ? error.name : typeof error}`);
+  if (BATCH_SIZE === 1) {
+    for (const term of pending) {
+      await saveAccepted({ [term.id]: await repairSingleFallback(term) });
     }
-    await saveAccepted({ [term.id]: await repairSingleFallback(term) });
+  } else {
+    const firstRound = await runRepairRound(pending, BATCH_SIZE, (terms) => translateBatch(terms), saveAccepted, defer);
+    const secondRound = await runRepairRound(firstRound, 5, (terms) => translateBatch(terms, true), saveAccepted, defer);
+    for (const term of secondRound) {
+      try {
+        const singleBatch = await translateBatch([term], true);
+        if (singleBatch.accepted[term.id]) {
+          await saveAccepted(singleBatch.accepted);
+          continue;
+        }
+      } catch (error) {
+        console.warn(`Deferring repair singleton: ${error instanceof Error ? error.name : typeof error}`);
+      }
+      await saveAccepted({ [term.id]: await repairSingleFallback(term) });
+    }
   }
   if (targets.some((term) => !Object.hasOwn(checkpoint.meanings, term.id))) {
     throw new Error('Repair checkpoint is incomplete');
