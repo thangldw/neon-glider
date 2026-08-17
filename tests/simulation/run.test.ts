@@ -5,7 +5,7 @@ describe('Neon Glider simulation', () => {
   it('creates a deterministic serializable run', () => {
     expect(createRunner(91)).toEqual(createRunner(91));
     expect(createRunner(91)).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       gameVersion: 'neon-glider-2026-08-17',
       lane: 1,
       distance: 0,
@@ -17,7 +17,10 @@ describe('Neon Glider simulation', () => {
       crystals: 0,
       status: 'playing',
       endReason: null,
+      reducedMotion: false,
     });
+    expect(createRunner(91, true).reducedMotion).toBe(true);
+    expect(() => createRunner(91, 'true' as never)).toThrow(RangeError);
   });
 
   it('moves exactly one lane and clamps the edges', () => {
@@ -55,6 +58,28 @@ describe('Neon Glider simulation', () => {
       { id: 'o', kind: 'cube' as const, lane: 1 as const, distance: 5, segment: 0 },
     ] };
     expect(advanceRunner(run, 5 / 26)).toMatchObject({ status: 'complete', endReason: 'collision' });
+  });
+
+  it('stops a collision tick at impact without applying later events', () => {
+    const run = {
+      ...createRunner(6),
+      entities: [
+        { id: 'impact', kind: 'cube' as const, lane: 1 as const, distance: 5, segment: 0 },
+        { id: 'later-crystal', kind: 'crystal' as const, lane: 1 as const, distance: 6, segment: 0 },
+      ],
+    };
+
+    const next = advanceRunner(run, 0.25);
+
+    expect(next).toMatchObject({
+      distance: 5,
+      score: 50,
+      energy: 100 - (2.5 * 5) / 26,
+      crystals: 0,
+      status: 'complete',
+      endReason: 'collision',
+    });
+    expect(next.entities).toEqual([{ id: 'later-crystal', kind: 'crystal', lane: 1, distance: 6, segment: 0 }]);
   });
 
   it('ends when energy reaches zero and never exceeds speed or multiplier caps', () => {

@@ -10,6 +10,7 @@ const OBSTACLE_KINDS: readonly TrackEntityKind[] = ['cube', 'prism', 'wall'];
 export interface GeneratedSegment {
   rngState: number;
   entities: TrackEntity[];
+  reachableLanes: Lane[];
 }
 
 function assertNonNegativeInteger(value: number, name: string): void {
@@ -20,10 +21,22 @@ function pickLane(available: Lane[], roll: number): Lane {
   return available.splice(Math.floor(roll * available.length), 1)[0];
 }
 
-export function generateSegment(rngState: number, segment: number, tier: number): GeneratedSegment {
+function assertReachableLanes(value: readonly Lane[]): void {
+  if (value.length === 0 || new Set(value).size !== value.length || value.some((lane) => !LANES.includes(lane))) {
+    throw new RangeError('reachableLanes must be a non-empty unique lane set');
+  }
+}
+
+export function generateSegment(
+  rngState: number,
+  segment: number,
+  tier: number,
+  reachableLanes: readonly Lane[] = LANES,
+): GeneratedSegment {
   if (!Number.isFinite(rngState)) throw new RangeError('rngState must be finite');
   assertNonNegativeInteger(segment, 'segment');
   assertNonNegativeInteger(tier, 'tier');
+  assertReachableLanes(reachableLanes);
   if (segment > MAX_SEGMENT) throw new RangeError('segment exceeds the serializable distance limit');
 
   const rng = createRng(rngState);
@@ -35,9 +48,11 @@ export function generateSegment(rngState: number, segment: number, tier: number)
   const crystalRoll = rng.next();
   const crystalLaneRoll = rng.next();
   const obstacleCount = tier < 2 || obstacleCountRoll < 0.5 ? 1 : 2;
-  const openLanes = [...LANES];
-  const obstacleLanes = [pickLane(openLanes, firstLaneRoll)];
-  if (obstacleCount === 2) obstacleLanes.push(pickLane(openLanes, secondLaneRoll));
+  const protectedLane = reachableLanes[Math.floor(firstLaneRoll * reachableLanes.length)];
+  const obstacleCandidates = LANES.filter((lane) => lane !== protectedLane);
+  const obstacleLanes = [pickLane(obstacleCandidates, secondLaneRoll)];
+  if (obstacleCount === 2) obstacleLanes.push(pickLane(obstacleCandidates, firstKindRoll));
+  const openLanes = LANES.filter((lane) => !obstacleLanes.includes(lane));
 
   const distance = SPAWN_OFFSET + segment * SEGMENT_LENGTH;
   const entities: TrackEntity[] = obstacleLanes.map((lane, index) => ({
@@ -52,5 +67,5 @@ export function generateSegment(rngState: number, segment: number, tier: number)
     entities.push({ id: `segment-${segment}-crystal`, kind: 'crystal', lane, distance, segment });
   }
 
-  return { rngState: rng.state(), entities };
+  return { rngState: rng.state(), entities, reachableLanes: openLanes };
 }

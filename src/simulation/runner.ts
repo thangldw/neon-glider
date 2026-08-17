@@ -24,28 +24,32 @@ function assertFinite(value: number, name: string): void {
   if (!Number.isFinite(value)) throw new RangeError(`${name} must be finite`);
 }
 
-function fillLookahead(run: RunnerState): Pick<RunnerState, 'rngState' | 'segmentCursor' | 'entities'> {
+function fillLookahead(run: RunnerState): Pick<RunnerState, 'rngState' | 'segmentCursor' | 'entities' | 'reachableLanes'> {
   let rngState = run.rngState;
   let segmentCursor = run.segmentCursor;
+  let reachableLanes = run.reachableLanes;
   const entities = [...run.entities];
   while (80 + segmentCursor * SEGMENT_LENGTH <= run.distance + LOOKAHEAD_DISTANCE) {
-    const generated = generateSegment(rngState, segmentCursor, run.gates);
+    const generated = generateSegment(rngState, segmentCursor, run.gates, reachableLanes);
     rngState = generated.rngState;
     segmentCursor += 1;
     entities.push(...generated.entities);
+    reachableLanes = generated.reachableLanes;
   }
-  return { rngState, segmentCursor, entities };
+  return { rngState, segmentCursor, entities, reachableLanes };
 }
 
-export function createRunner(seed: number): RunnerState {
+export function createRunner(seed: number, reducedMotion = false): RunnerState {
   assertFinite(seed, 'seed');
+  if (typeof reducedMotion !== 'boolean') throw new RangeError('reducedMotion must be a boolean');
   const initial: RunnerState = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     gameVersion: GAME_VERSION,
     seed: seed >>> 0,
     rngState: seed >>> 0,
     status: 'playing',
     endReason: null,
+    reducedMotion,
     lane: 1,
     distance: 0,
     speed: START_SPEED,
@@ -55,6 +59,7 @@ export function createRunner(seed: number): RunnerState {
     gates: 0,
     crystals: 0,
     segmentCursor: 0,
+    reachableLanes: [0, 1, 2],
     entities: [],
   };
   return { ...initial, ...fillLookahead(initial) };
@@ -77,7 +82,12 @@ export function advanceRunner(run: RunnerState, deltaSeconds: number): RunnerSta
   if (deltaSeconds < 0 || deltaSeconds > 0.25) throw new RangeError('deltaSeconds must be in [0, 0.25]');
 
   const oldDistance = run.distance;
-  const distance = oldDistance + run.speed * deltaSeconds;
+  const intendedDistance = oldDistance + run.speed * deltaSeconds;
+  const impactDistance = run.entities
+    .filter((entity) => isObstacle(entity) && entity.lane === run.lane && entity.distance > oldDistance && entity.distance <= intendedDistance)
+    .reduce<number | null>((nearest, entity) => nearest === null || entity.distance < nearest ? entity.distance : nearest, null);
+  const collision = impactDistance !== null;
+  const distance = impactDistance ?? intendedDistance;
   const gatesCrossed = Math.max(0, Math.floor(distance / GATE_DISTANCE) - Math.floor(oldDistance / GATE_DISTANCE));
   const gates = run.gates + gatesCrossed;
   const speed = clamp(run.speed + gatesCrossed * GATE_SPEED, START_SPEED, MAX_SPEED);
@@ -85,11 +95,10 @@ export function advanceRunner(run: RunnerState, deltaSeconds: number): RunnerSta
   const crossed = run.entities
     .filter((entity) => entity.distance > oldDistance && entity.distance <= distance)
     .sort((left, right) => left.distance - right.distance || Number(isObstacle(right)) - Number(isObstacle(left)) || left.id.localeCompare(right.id));
-  const collision = crossed.some((entity) => isObstacle(entity) && entity.lane === run.lane);
   const collectedCrystals = crossed.filter((entity) => entity.kind === 'crystal' && entity.lane === run.lane).length;
   const entities = run.entities.filter((entity) => entity.distance > distance);
   const energy = clamp(
-    run.energy - (2.5 + Math.min(run.gates, 10) * 0.2) * deltaSeconds + gatesCrossed * GATE_ENERGY + collectedCrystals * CRYSTAL_ENERGY,
+    run.energy - (2.5 + Math.min(run.gates, 10) * 0.2) * ((distance - oldDistance) / run.speed) + gatesCrossed * GATE_ENERGY + collectedCrystals * CRYSTAL_ENERGY,
     0,
     START_ENERGY,
   );

@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { createRng } from '../../src/simulation/rng';
 import { generateSegment } from '../../src/simulation/track-generator';
+import type { Lane } from '../../src/simulation/runner-types';
 
 it('is deterministic and leaves at least one lane open', () => {
   let state = 123;
@@ -19,6 +20,21 @@ it('never places a crystal in a blocked lane within the same segment', () => {
   const generated = generateSegment(706, 8, 4);
   const blocked = new Set(generated.entities.filter((entity) => entity.kind !== 'crystal').map((entity) => entity.lane));
   expect(generated.entities.filter((entity) => entity.kind === 'crystal').every((entity) => !blocked.has(entity.lane))).toBe(true);
+});
+
+it('keeps at least one previously reachable lane open across adjacent segments', () => {
+  let state = 123;
+  let reachable: Lane[] = [0, 1, 2];
+  for (let segment = 0; segment < 200; segment += 1) {
+    const generated = generateSegment(state, segment, 4, reachable);
+    const open = ([0, 1, 2] as Lane[]).filter((lane) => !generated.entities.some(
+      (entity) => entity.kind !== 'crystal' && entity.lane === lane,
+    ));
+    expect(open.some((lane) => reachable.includes(lane))).toBe(true);
+    expect(generated.reachableLanes).toEqual(open);
+    state = generated.rngState;
+    reachable = generated.reachableLanes;
+  }
 });
 
 it('consumes a fixed RNG budget and emits collision-free IDs across long runs', () => {
