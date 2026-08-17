@@ -133,6 +133,7 @@ test('keeps the production hook absent without the explicit query gate', async (
 test('starts, steers, collects, passes a gate and reaches collision result', async ({ page }) => {
   await startRun(page, 7);
   await page.keyboard.press('ArrowRight');
+  expect((await snapshot(page)).run?.lane).toBe(2);
   const active = await advanceSafelyTo(page, 270);
   expect(active.run?.distance).toBeGreaterThanOrEqual(270);
   expect(active.run?.gates).toBeGreaterThan(0);
@@ -273,6 +274,15 @@ test('reaches deterministic speed and multiplier caps without collisions', async
 
 test('keeps the full ship visible in all lanes without horizontal overflow', async ({ page }) => {
   await startRun(page, 37);
+  const renderScale = await page.locator('canvas').evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    return {
+      x: canvas.width / canvas.clientWidth,
+      y: canvas.height / canvas.clientHeight,
+    };
+  });
+  expect(renderScale.x).toBeGreaterThanOrEqual(1);
+  expect(renderScale.y).toBeGreaterThanOrEqual(1);
   for (const lane of [0, 1, 2] as const) {
     await setLane(page, lane);
     const diagnostics = await page.evaluate(() => (

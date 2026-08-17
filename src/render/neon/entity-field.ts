@@ -10,6 +10,7 @@ const ENTITY_Y: Record<TrackEntityKind, number> = {
   crystal: -1.9,
 };
 const ENTITY_KINDS = ['cube', 'prism', 'wall', 'crystal'] as const;
+const OBSTACLE_KINDS = ['cube', 'prism', 'wall'] as const;
 const MAX_INSTANCES_PER_KIND = 64;
 
 export interface EntityField {
@@ -41,6 +42,17 @@ export function createEntityField(materials: NeonMaterials): EntityField {
     batch.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     batches[kind] = batch;
     root.add(batch);
+  }
+  const outlineBatches = {} as Record<(typeof OBSTACLE_KINDS)[number], THREE.InstancedMesh>;
+  for (const kind of OBSTACLE_KINDS) {
+    const outline = new THREE.InstancedMesh(geometries[kind], materials.obstacleEdge, MAX_INSTANCES_PER_KIND);
+    outline.name = `${kind}-entity-outline`;
+    outline.count = 0;
+    outline.frustumCulled = false;
+    outline.renderOrder = 2;
+    outline.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    outlineBatches[kind] = outline;
+    root.add(outline);
   }
 
   const active = new Map<string, THREE.Object3D>();
@@ -106,11 +118,16 @@ export function createEntityField(materials: NeonMaterials): EntityField {
         if (index >= MAX_INSTANCES_PER_KIND) throw new RangeError(`Too many ${kind} entities`);
         marker.updateMatrix();
         batches[kind].setMatrixAt(index, marker.matrix);
+        if (kind !== 'crystal') outlineBatches[kind].setMatrixAt(index, marker.matrix);
         counts[kind] += 1;
       }
       for (const kind of ENTITY_KINDS) {
         batches[kind].count = counts[kind];
         batches[kind].instanceMatrix.needsUpdate = true;
+        if (kind !== 'crystal') {
+          outlineBatches[kind].count = counts[kind];
+          outlineBatches[kind].instanceMatrix.needsUpdate = true;
+        }
       }
     },
     dispose() {

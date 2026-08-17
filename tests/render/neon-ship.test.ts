@@ -16,6 +16,8 @@ it('builds the armored ship silhouette from named procedural parts', () => {
     'cockpit-light',
     'edge-light-left',
     'edge-light-right',
+    'trim-cyan-left',
+    'trim-cyan-right',
     'trail-left',
     'trail-right',
   ]) {
@@ -24,10 +26,11 @@ it('builds the armored ship silhouette from named procedural parts', () => {
   expect(ship.root.getObjectByName('wing-left')!.position.x).toBeLessThan(0);
   expect(ship.root.getObjectByName('wing-right')!.position.x).toBeGreaterThan(0);
   expect(ship.root.getObjectByName('ship-panel-lights')?.userData.panelCount).toBe(3);
-  const fuselageMaterial = (ship.root.getObjectByName('fuselage') as THREE.Mesh).material as THREE.MeshStandardMaterial;
+  const fuselageMaterial = (ship.root.getObjectByName('fuselage') as THREE.Mesh).material as THREE.MeshPhongMaterial;
   const shipTone = { h: 0, s: 0, l: 0 };
   fuselageMaterial.color.getHSL(shipTone);
   expect(fuselageMaterial).not.toBe(materials.metal);
+  expect(fuselageMaterial).toBeInstanceOf(THREE.MeshPhongMaterial);
   expect(fuselageMaterial.wireframe).toBe(false);
   expect(shipTone.l).toBeGreaterThan(0.16);
 

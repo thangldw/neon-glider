@@ -28,10 +28,10 @@ interface Edge {
   angle: number;
 }
 
-function octagonEdges(): Edge[] {
+function octagonEdges(radiusX = TUNNEL_RADIUS_X, radiusY = TUNNEL_RADIUS_Y): Edge[] {
   const vertices = Array.from({ length: 8 }, (_, index) => {
     const angle = Math.PI / 8 + index * Math.PI / 4;
-    return new THREE.Vector2(Math.cos(angle) * TUNNEL_RADIUS_X, Math.sin(angle) * TUNNEL_RADIUS_Y);
+    return new THREE.Vector2(Math.cos(angle) * radiusX, Math.sin(angle) * radiusY);
   });
   return vertices.map((start, index) => {
     const end = vertices[(index + 1) % vertices.length];
@@ -78,6 +78,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const root = new THREE.Group();
   root.name = 'neon-tunnel';
   const edges = octagonEdges();
+  const innerGateEdges = octagonEdges(TUNNEL_RADIUS_X * 0.86, TUNNEL_RADIUS_Y * 0.86);
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   const labelGeometry = new THREE.PlaneGeometry(3.4, 0.72);
   const scratchMatrix = new THREE.Matrix4();
@@ -127,15 +128,24 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
 
   const activeGate = new THREE.Group();
   activeGate.name = 'active-gate';
-  const gateFrame = new THREE.InstancedMesh(unitBox, materials.cyan, 7);
+  const gateFrame = new THREE.InstancedMesh(unitBox, materials.cyan, 14);
   gateFrame.name = 'active-gate-frame';
   for (let index = 0, instance = 0; index < edges.length; index += 1) {
     if (index === 5) continue;
-    setBoxMatrix(gateFrame, instance, edges[index], 0, 0.19, 0.22);
+    setBoxMatrix(gateFrame, instance, edges[index], 0, 0.27, 0.3);
+    instance += 1;
+    setBoxMatrix(gateFrame, instance, innerGateEdges[index], -0.32, 0.12, 0.22);
     instance += 1;
   }
   gateFrame.instanceMatrix.needsUpdate = true;
   gateFrame.frustumCulled = false;
+  const gateAccent = new THREE.InstancedMesh(unitBox, materials.magenta, 4);
+  gateAccent.name = 'active-gate-accent';
+  for (const [instance, edgeIndex] of [0, 2, 4, 6].entries()) {
+    setBoxMatrix(gateAccent, instance, innerGateEdges[edgeIndex], 0.22, 0.07, 0.38);
+  }
+  gateAccent.instanceMatrix.needsUpdate = true;
+  gateAccent.frustumCulled = false;
   const gateTexture = createGateTexture(1);
   const gateLabelMaterial = new THREE.MeshBasicMaterial({
     map: gateTexture,
@@ -145,7 +155,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const gateLabel = new THREE.Mesh(labelGeometry, gateLabelMaterial);
   gateLabel.name = 'gate-number';
   gateLabel.position.set(0, FLOOR_Y + 7.2, 0.16);
-  activeGate.add(gateFrame, gateLabel);
+  activeGate.add(gateFrame, gateAccent, gateLabel);
   root.add(ribs, wallGroup, floorGroup, activeGate);
 
   const loopLength = segmentCount * SEGMENT_SPACING;
@@ -175,7 +185,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       for (let edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 1) {
         const mesh = (segment + edgeIndex) % 2 === 0 ? cyanRibs : magentaRibs;
         const index = mesh === cyanRibs ? cyanIndex++ : magentaIndex++;
-        setBoxMatrix(mesh, index, edges[edgeIndex], ribZ, 0.06, 0.12);
+        setBoxMatrix(mesh, index, edges[edgeIndex], ribZ, 0.1, 0.16);
         (mesh === cyanRibs ? cyanSegments : magentaSegments)[index] = segment;
         if (edgeIndex !== 5) {
           setBoxMatrix(wallPanels, wallIndex, edges[edgeIndex], ribZ - SEGMENT_SPACING / 2, 0.16, SEGMENT_SPACING * 0.88);

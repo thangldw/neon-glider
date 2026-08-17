@@ -80,7 +80,7 @@ function defaultRenderer(canvas: HTMLCanvasElement): RendererLike {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.82;
+  renderer.toneMappingExposure = 0.96;
   return renderer;
 }
 
@@ -89,8 +89,8 @@ function createSpeedStreaks(quality: 'desktop' | 'mobile', materials: NeonMateri
   const positions = new Float32Array(count * 3);
   const baseZ = new Float32Array(count);
   const colors = new Float32Array(count * 3);
-  const cyan = new THREE.Color(materials.cyan.emissive);
-  const magenta = new THREE.Color(materials.magenta.emissive);
+  const cyan = new THREE.Color(materials.cyan.color);
+  const magenta = new THREE.Color(materials.magenta.color);
   for (let index = 0; index < count; index += 1) {
     const side = index % 2 === 0 ? -1 : 1;
     positions[index * 3] = side * (3.65 + ((index * 17) % 19) * 0.12);
@@ -238,17 +238,10 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       const key = new THREE.DirectionalLight(0xb7eaff, 1.45);
       key.position.set(2.5, 7, 5);
       scene.add(key);
-      const magentaFill = new THREE.PointLight(0xff20c8, 2.4, 28, 1.6);
-      magentaFill.position.set(-3.5, -0.5, 2);
-      scene.add(magentaFill);
-      const cyanFill = new THREE.PointLight(0x00cfff, 2.7, 34, 1.7);
-      cyanFill.position.set(3.2, 1.8, -6);
-      scene.add(cyanFill);
-
       const postFxFactory = options.createPostFx ?? createPostFx;
       try {
         postFx = postFxFactory(renderer, scene, camera, {
-          enabled: quality === 'mobile',
+          enabled: false,
           quality,
           width,
           height,
@@ -343,8 +336,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     const quality = responsiveQuality(width, height);
     if (graph && quality !== graph.quality) replaceGraph(quality, width, height);
     applyCameraLayout(graph, width, height);
-    const portraitOrMobile = quality === 'mobile' || height > width;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, portraitOrMobile ? 1.35 : 0.5));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
     renderer.setSize(width, height);
     graph.postFx.setSize(width, height);
   }

@@ -68,9 +68,11 @@ it('creates a bounded recycled tunnel with named gate and floor groups', () => w
   expect((tunnel.root.getObjectByName('cyan-ribs') as THREE.InstancedMesh).userData.railInstanceCount).toBe(96);
   expect((tunnel.root.getObjectByName('magenta-ribs') as THREE.InstancedMesh).userData.railInstanceCount).toBe(96);
   expect(tunnel.root.getObjectByName('active-gate')).toBeTruthy();
+  expect((tunnel.root.getObjectByName('active-gate-frame') as THREE.InstancedMesh).count).toBe(14);
+  expect(tunnel.root.getObjectByName('active-gate-accent')).toBeTruthy();
   expect(tunnel.root.getObjectByName('gate-number')).toBeTruthy();
   expect(tunnel.segmentCount).toBe(24);
-  expect(firstRibScale.y).toBeLessThanOrEqual(0.065);
+  expect(firstRibScale.y).toBeGreaterThanOrEqual(0.09);
 
   const children = tunnel.root.children.length;
   tunnel.update(1_000, 12);
@@ -89,7 +91,7 @@ it('uses instancing and the reduced mobile segment budget', () => withCanvasCont
   });
 
   expect(tunnel.segmentCount).toBe(16);
-  expect(instances).toHaveLength(5);
+  expect(instances).toHaveLength(6);
   tunnel.dispose();
   materials.dispose();
 }));

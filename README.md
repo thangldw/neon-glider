@@ -21,7 +21,7 @@ npm run build
 npm run test:e2e
 ```
 
-The verified local release has 118/118 unit tests and 28/28 browser tests: 14 desktop Chromium cases and the same 14 cases under Pixel 7 emulation. The production bundle is 4,684 KiB. `dist/index.html` references JavaScript and CSS through relative `./assets/...` URLs, so the configured `/neon-glider/` static base works on GitHub Pages.
+The verified local release has 118/118 unit tests and 28/28 browser tests: 14 desktop Chromium cases and the same 14 cases under Pixel 7 emulation. The production bundle is 4,680 KiB. `dist/index.html` references JavaScript and CSS through relative `./assets/...` URLs, so the configured `/neon-glider/` static base works on GitHub Pages.
 
 ## GitHub Pages
 
@@ -33,6 +33,6 @@ Deployment was not run for this release because no remote or GitHub Pages deploy
 
 Performance measurements are local single-host evidence only: they describe the browser, GPU, device profile, and run used for measurement. They do not establish a deployment-wide performance guarantee.
 
-The 2026-08-17 acceptance run used Chromium 151.0.7922.34 on an Apple M3 Pro with 18 GiB RAM (`darwin arm64`). Desktop and mobile projects run serially with one worker so each sample measures one isolated GPU workload on the host. Desktop (`1536 × 1024`, not emulated) sampled 76 frames: 25.0 ms median, 87.6 ms worst, one slow frame, longest slow-frame streak 1, 26 maximum draw calls, 14 geometries, and 2 textures. Pixel 7 emulation (`412 × 839` CSS pixels) sampled 115 frames: 16.7 ms median, 66.7 ms worst, one slow frame, longest streak 1, 28 maximum draw calls, 15 geometries, and 4 textures.
+The 2026-08-17 acceptance run used Chromium 151.0.7922.34 on an Apple M3 Pro with 18 GiB RAM (`darwin arm64`). Desktop and mobile projects run serially with one worker so each sample measures one isolated GPU workload on the host. Both release profiles use CSS-faithful WebGL backing scale 1 and direct rendering; low-cost Phong solids and instanced edge/gate detail preserve depth without a reduced-resolution post-processing buffer. Desktop (`1536 × 1024`, not emulated) sampled 62 frames: 33.3 ms median, 50.1 ms worst, two slow frames, longest slow-frame streak 1, 32 maximum draw calls, 14 geometries, and 1 texture. Pixel 7 emulation (`412 × 839` CSS pixels) sampled 183 frames: 8.4 ms median, 75.3 ms worst, one slow frame, longest streak 1, 32 maximum draw calls, 14 geometries, and 1 texture.
 
-The pinned reference and final desktop gameplay render pass the blocking comparison in `design-qa.md`. Remaining P3 polish is limited to the intentionally low-poly procedural treatment having less volumetric and micro-surface detail than the cinematic reference, plus slight edge stepping from the half-resolution desktop canvas and reduced-resolution mobile glow.
+The pinned reference and final desktop gameplay render pass the blocking comparison in `design-qa.md`. Remaining P3 polish is limited to the intentionally low-poly procedural treatment having less volumetric halo and micro-surface density than the cinematic reference; the release no longer trades visual resolution for performance.

@@ -100,7 +100,7 @@ it('builds the chase scene and mirrors snapshots without mutating simulation sta
   view.dispose();
 });
 
-it('keeps scene fill lights bounded so emissive geometry retains surface detail', () => {
+it('avoids per-fragment point-light loops while solid emissive surfaces retain depth', () => {
   const renderer = rendererFixture();
   const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
   view.setSnapshot(createRunner(5));
@@ -108,15 +108,14 @@ it('keeps scene fill lights bounded so emissive geometry retains surface detail'
   const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
   const fills = scene.children.filter((object): object is THREE.PointLight => object instanceof THREE.PointLight);
 
-  expect(fills).toHaveLength(2);
-  expect(Math.max(...fills.map(({ intensity }) => intensity))).toBeLessThanOrEqual(3);
+  expect(fills).toHaveLength(0);
   view.dispose();
 });
 
 it.each([
   ['desktop' as const, 1_536, 1_024, false],
-  ['mobile' as const, 412, 915, true],
-])('selects post-processing for the %s release budget', (quality, width, height, expectedEnabled) => {
+  ['mobile' as const, 412, 915, false],
+])('selects full-resolution direct rendering for the %s release budget', (quality, width, height, expectedEnabled) => {
   const renderer = rendererFixture();
   let enabled: boolean | undefined;
   const view = createRunnerView(containerFixture(width, height), {
@@ -287,17 +286,17 @@ it('uses the release render scale by responsive quality and resizes the camera a
         return { observe: vi.fn(), disconnect: vi.fn() };
       },
     });
-    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(0.5);
+    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
     setContainerSize(desktopContainer, 412, 915);
     resizeDesktop?.([], {} as ResizeObserver);
-    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1.35);
+    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
     expect(desktopRenderer.setSize).toHaveBeenLastCalledWith(412, 915);
     expect(fxSize).toHaveBeenLastCalledWith(412, 915);
     desktop.dispose();
 
     const mobileRenderer = rendererFixture();
     const mobile = createRunnerView(containerFixture(412, 915), { ...fixtureOptions(mobileRenderer), forceQuality: 'mobile' });
-    expect(mobileRenderer.setPixelRatio).toHaveBeenLastCalledWith(1.35);
+    expect(mobileRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
     mobile.dispose();
   } finally {
     if (descriptor) Object.defineProperty(window, 'devicePixelRatio', descriptor);

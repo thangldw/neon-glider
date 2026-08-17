@@ -81,7 +81,7 @@ it('falls back permanently when a composed frame fails', () => {
   fx.dispose();
 });
 
-it('uses reduced internal bloom resolution on mobile and disposes once', () => {
+it('keeps mobile glow at CSS-faithful resolution and disposes once', () => {
   const renderer = rendererFixture();
   const fixture = composerFixture();
   const fx = createPostFx(renderer, new THREE.Scene(), new THREE.PerspectiveCamera(), {
@@ -92,19 +92,19 @@ it('uses reduced internal bloom resolution on mobile and disposes once', () => {
     createComposer: () => fixture.composer,
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(165, 366);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(412, 915);
   const glow = fixture.passes[1] as { uniforms: Record<string, { value: number | THREE.Vector2 }> };
   expect(glow.uniforms.strength.value).toBe(0.28);
   expect(glow.uniforms.threshold.value).toBe(0.7);
   fx.setSize(400, 800);
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(160, 320);
-  expect(glow.uniforms.resolution.value).toMatchObject({ x: 160, y: 320 });
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(400, 800);
+  expect(glow.uniforms.resolution.value).toMatchObject({ x: 400, y: 800 });
   fx.dispose();
   fx.dispose();
   expect(fixture.composer.dispose).toHaveBeenCalledOnce();
 });
 
-it('uses a bounded desktop bloom buffer and restrained highlight response', () => {
+it('keeps desktop glow at CSS-faithful resolution with a restrained highlight response', () => {
   const fixture = composerFixture();
   let target: THREE.WebGLRenderTarget | undefined;
   const fx = createPostFx(rendererFixture(), new THREE.Scene(), new THREE.PerspectiveCamera(), {
@@ -118,12 +118,12 @@ it('uses a bounded desktop bloom buffer and restrained highlight response', () =
     },
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(614, 410);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(1_536, 1_024);
   expect(target?.texture.type).toBe(THREE.UnsignedByteType);
   const glow = fixture.passes[1] as { uniforms: Record<string, { value: number | THREE.Vector2 }> };
   expect(glow.uniforms.strength.value).toBe(0.34);
   expect(glow.uniforms.threshold.value).toBe(0.68);
-  expect(glow.uniforms.resolution.value).toMatchObject({ x: 614, y: 410 });
+  expect(glow.uniforms.resolution.value).toMatchObject({ x: 1_536, y: 1_024 });
   fx.dispose();
 });
 

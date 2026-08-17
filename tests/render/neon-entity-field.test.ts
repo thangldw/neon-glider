@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { createEntityField } from '../../src/render/neon/entity-field';
 import { createNeonMaterials } from '../../src/render/neon/materials';
 
-it('batches each entity kind into one instanced draw', () => {
+it('batches solid entities and obstacle edge depth into bounded instanced draws', () => {
   const materials = createNeonMaterials();
   const field = createEntityField(materials);
   field.sync([
@@ -14,8 +14,10 @@ it('batches each entity kind into one instanced draw', () => {
   ], 0);
   const batches = field.root.children.filter((child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh);
 
-  expect(batches).toHaveLength(4);
-  expect(batches.map(({ count }) => count)).toEqual([1, 1, 1, 1]);
+  expect(batches).toHaveLength(7);
+  expect(field.root.getObjectByName('cube-entity-outline')).toMatchObject({ count: 1 });
+  expect(field.root.getObjectByName('prism-entity-outline')).toMatchObject({ count: 1 });
+  expect(field.root.getObjectByName('wall-entity-outline')).toMatchObject({ count: 1 });
   field.dispose();
   materials.dispose();
 });

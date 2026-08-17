@@ -37,9 +37,10 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   const shipMetal = materials.metal.clone();
   shipMetal.color.setHex(0x46689c);
   shipMetal.emissive.setHex(0x0a1c4c);
-  shipMetal.emissiveIntensity = 0.72;
-  shipMetal.metalness = 0.76;
-  shipMetal.roughness = 0.35;
+  shipMetal.emissiveIntensity = 0.82;
+  shipMetal.specular.setHex(0x85cfff);
+  shipMetal.shininess = 55;
+  shipMetal.flatShading = true;
   shipMetal.wireframe = false;
 
   function own<T extends THREE.BufferGeometry>(geometry: T): T {
@@ -121,6 +122,13 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   const edgeRight = add('edge-light-right', unitBox, materials.magenta, [1.75, 0.02, 0.52]);
   edgeRight.scale.set(1.45, 0.075, 0.1);
   edgeRight.rotation.y = 0.58;
+
+  const trimLeft = add('trim-cyan-left', unitBox, materials.cyan, [-0.68, 0.2, -0.18]);
+  trimLeft.scale.set(0.08, 0.08, 1.48);
+  trimLeft.rotation.y = -0.18;
+  const trimRight = add('trim-cyan-right', unitBox, materials.cyan, [0.68, 0.2, -0.18]);
+  trimRight.scale.set(0.08, 0.08, 1.48);
+  trimRight.rotation.y = 0.18;
 
   const trailLeft = add('trail-left', trailGeometry, materials.trailMagenta, [-1.12, -0.12, 3.15]);
   const trailRight = add('trail-right', trailGeometry, materials.trailMagenta, [1.12, -0.12, 3.15]);

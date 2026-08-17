@@ -42,8 +42,8 @@ export interface PostFxOptions {
   createComposer?: (renderer: RendererLike, renderTarget: THREE.WebGLRenderTarget) => ComposerLike;
 }
 
-const DESKTOP_RESOLUTION_SCALE = 0.4;
-const MOBILE_RESOLUTION_SCALE = 0.4;
+const DESKTOP_RESOLUTION_SCALE = 1;
+const MOBILE_RESOLUTION_SCALE = 1;
 
 const NEON_GLOW_SHADER = {
   name: 'NeonGlowShader',
@@ -78,12 +78,8 @@ const NEON_GLOW_SHADER = {
       vec3 halo = bright(texture2D(tDiffuse, vUv + vec2(offset.x, 0.0)).rgb)
         + bright(texture2D(tDiffuse, vUv - vec2(offset.x, 0.0)).rgb)
         + bright(texture2D(tDiffuse, vUv + vec2(0.0, offset.y)).rgb)
-        + bright(texture2D(tDiffuse, vUv - vec2(0.0, offset.y)).rgb)
-        + bright(texture2D(tDiffuse, vUv + offset).rgb)
-        + bright(texture2D(tDiffuse, vUv - offset).rgb)
-        + bright(texture2D(tDiffuse, vUv + vec2(offset.x, -offset.y)).rgb)
-        + bright(texture2D(tDiffuse, vUv + vec2(-offset.x, offset.y)).rgb);
-      gl_FragColor = vec4(base.rgb + halo * (strength / 8.0), base.a);
+        + bright(texture2D(tDiffuse, vUv - vec2(0.0, offset.y)).rgb);
+      gl_FragColor = vec4(base.rgb + halo * (strength / 4.0), base.a);
     }
   `,
 };
