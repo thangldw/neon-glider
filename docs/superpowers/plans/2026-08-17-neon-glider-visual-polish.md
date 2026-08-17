@@ -246,7 +246,7 @@ Update only matrix Z elements during travel. Dispose only tunnel-owned geometry/
 
 - [ ] **Step 5: Prove allocation-free update and bounded instance budgets**
 
-Extend the existing 120-frame construction counter test to include the new meshes and assert desktop instances remain below `320` total and mobile below `220` total.
+Extend the existing 120-frame construction counter test to include the new meshes and assert the new depth-layer pools remain bounded at `144` desktop / `96` mobile instances. Unchanged baseline tunnel counts are outside Task 2.
 
 Run: `npx vitest run tests/render/neon-materials.test.ts tests/render/neon-tunnel.test.ts`
 
