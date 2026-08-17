@@ -92,10 +92,43 @@ it('builds the chase scene and mirrors snapshots without mutating simulation sta
   expect(run).toEqual(frozen);
   const [scene, camera] = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0] as [THREE.Scene, THREE.PerspectiveCamera];
   expect(camera).toMatchObject({ fov: 64, near: 0.1, far: 220 });
+  expect(camera.position.z).toBeLessThanOrEqual(5.5);
   for (const name of ['neon-ship-anchor', 'neon-tunnel', 'entity-field', 'speed-streaks']) {
     expect(scene.getObjectByName(name)).toBeTruthy();
   }
   expect(scene.fog).toBeInstanceOf(THREE.Fog);
+  view.dispose();
+});
+
+it('keeps scene fill lights bounded so emissive geometry retains surface detail', () => {
+  const renderer = rendererFixture();
+  const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
+  view.setSnapshot(createRunner(5));
+  view.render(1);
+  const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
+  const fills = scene.children.filter((object): object is THREE.PointLight => object instanceof THREE.PointLight);
+
+  expect(fills).toHaveLength(2);
+  expect(Math.max(...fills.map(({ intensity }) => intensity))).toBeLessThanOrEqual(3);
+  view.dispose();
+});
+
+it.each([
+  ['desktop' as const, 1_536, 1_024, false],
+  ['mobile' as const, 412, 915, true],
+])('selects post-processing for the %s release budget', (quality, width, height, expectedEnabled) => {
+  const renderer = rendererFixture();
+  let enabled: boolean | undefined;
+  const view = createRunnerView(containerFixture(width, height), {
+    ...fixtureOptions(renderer),
+    forceQuality: quality,
+    createPostFx: (target, scene, camera, options) => {
+      enabled = options.enabled;
+      return { render: () => target.render(scene, camera), setSize: vi.fn(), dispose: vi.fn() };
+    },
+  });
+
+  expect(enabled).toBe(expectedEnabled);
   view.dispose();
 });
 
@@ -121,6 +154,12 @@ it.each([
     expect(framing.gliderBounds.maxY).toBeLessThanOrEqual(1);
     expect(framing.gliderBounds.minZ).toBeGreaterThanOrEqual(-1);
     expect(framing.gliderBounds.maxZ).toBeLessThanOrEqual(1);
+    if (quality === 'desktop') {
+      expect(
+        framing.gliderBounds.maxX - framing.gliderBounds.minX,
+        `lane ${lane}: ${JSON.stringify(framing)}`,
+      ).toBeGreaterThanOrEqual(0.68);
+    }
   }
   view.dispose();
 });
@@ -220,7 +259,7 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
 
     for (const result of results) {
       const budget = result.width === 1536 ? 60 : 45;
-      const representativeCeiling = result.width === 1536 ? 59 : 34;
+      const representativeCeiling = result.width === 1536 ? 40 : 34;
       expect(result.framing.gliderVisible, JSON.stringify(result)).toBe(true);
       expect(result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(budget);
       expect(result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(representativeCeiling);
@@ -232,7 +271,7 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
   }
 }, 20_000);
 
-it('caps DPR by responsive quality and resizes the camera and post FX', () => {
+it('uses the release render scale by responsive quality and resizes the camera and post FX', () => {
   const descriptor = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
   Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 3 });
   try {
@@ -248,7 +287,7 @@ it('caps DPR by responsive quality and resizes the camera and post FX', () => {
         return { observe: vi.fn(), disconnect: vi.fn() };
       },
     });
-    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(2);
+    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(0.5);
     setContainerSize(desktopContainer, 412, 915);
     resizeDesktop?.([], {} as ResizeObserver);
     expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1.35);

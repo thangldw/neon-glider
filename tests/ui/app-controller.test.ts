@@ -386,6 +386,42 @@ describe('test API', () => {
     expect(queried.test).toBeDefined();
     queried.destroy();
   });
+
+  it('resets renderer sampling before a bounded performance window', () => {
+    const frames = frameHarness();
+    const app = createAppController(root, dependencies({
+      requestFrame: frames.requestFrame,
+      cancelFrame: frames.cancelFrame,
+    }));
+    start(app);
+    frames.advance(300, 100);
+    expect(app.test!.diagnostics()!.sampleCount).toBeGreaterThan(0);
+
+    app.test!.resetDiagnostics();
+
+    expect(app.test!.diagnostics()).toMatchObject({ sampleCount: 0, slowFrameCount: 0, longestSlowFrameStreak: 0 });
+    app.destroy();
+  });
+
+  it('freezes only real-time frames while keeping deterministic reducer advance available', () => {
+    const frames = frameHarness();
+    const app = createAppController(root, dependencies({
+      requestFrame: frames.requestFrame,
+      cancelFrame: frames.cancelFrame,
+    }));
+    start(app);
+    const started = app.test!.snapshot().run!.distance;
+
+    app.test!.setSimulationFrozen(true);
+    frames.advance(500, 100);
+    expect(app.test!.snapshot().run!.distance).toBe(started);
+    app.test!.advance(0.25);
+    expect(app.test!.snapshot().run!.distance).toBeGreaterThan(started);
+    app.test!.setSimulationFrozen(false);
+    frames.advance(200, 100);
+    expect(app.test!.snapshot().run!.distance).toBeGreaterThan(started + 6.5);
+    app.destroy();
+  });
 });
 
 describe('motion preference', () => {

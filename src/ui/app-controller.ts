@@ -46,6 +46,8 @@ export interface NeonGliderE2E {
   advance(seconds: number): void;
   forceEnd(reason: Exclude<EndReason, null>): void;
   diagnostics(): PerfSnapshot | null;
+  resetDiagnostics(): void;
+  setSimulationFrozen(frozen: boolean): void;
 }
 
 export interface AppControllerDependencies {
@@ -186,6 +188,7 @@ export function createAppController(
   let contextSuspended = false;
   let resumeRequested = false;
   let destroyed = false;
+  let testSimulationFrozen = false;
   const frameClock = new FrameClock();
 
   const showStorageWarning = () => {
@@ -298,7 +301,7 @@ export function createAppController(
   const renderFrame: FrameRequestCallback = (timestamp) => {
     if (destroyed || !view) return;
     const delta = frameClock.accept(timestamp);
-    applyAdvance(delta);
+    if (!testSimulationFrozen) applyAdvance(delta);
     view?.render(timestamp / 1_000);
     if (view && perfMonitor) perfMonitor.record(timestamp, view.getDiagnostics());
     if (!destroyed && view) frameHandle = requestFrame(renderFrame);
@@ -515,6 +518,14 @@ export function createAppController(
     diagnostics() {
       if (!perfMonitor || !view) return null;
       return { ...perfMonitor.snapshot(), framing: view.getFramingDiagnostics() };
+    },
+    resetDiagnostics() {
+      perfMonitor?.reset();
+    },
+    setSimulationFrozen(frozen) {
+      if (typeof frozen !== 'boolean') throw new TypeError('frozen must be a boolean');
+      testSimulationFrozen = frozen;
+      frameClock.reset();
     },
   } : undefined;
 

@@ -80,7 +80,7 @@ function defaultRenderer(canvas: HTMLCanvasElement): RendererLike {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 0.82;
   return renderer;
 }
 
@@ -217,8 +217,6 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     scene.fog = new THREE.Fog(0x03031a, 24, quality === 'desktop' ? 176 : 132);
     const camera = new THREE.PerspectiveCamera(64, width / height, 0.1, 220);
     const materials = createNeonMaterials();
-    // Transmission triggers a full opaque-scene prepass; mobile keeps the emissive transparent crystal without it.
-    if (quality === 'mobile') materials.crystal.transmission = 0;
     let tunnel: NeonTunnel | null = null;
     let ship: NeonShip | null = null;
     let entityField: EntityField | null = null;
@@ -231,26 +229,26 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       streaks = createSpeedStreaks(quality, materials);
       const shipAnchor = new THREE.Group();
       shipAnchor.name = 'neon-ship-anchor';
-      shipAnchor.position.set(0, quality === 'mobile' ? -2.25 : -1.7, quality === 'mobile' ? 2.2 : -1);
-      shipAnchor.scale.setScalar(quality === 'mobile' ? 0.55 : 0.76);
+      shipAnchor.position.set(0, quality === 'mobile' ? -2.25 : -0.9, quality === 'mobile' ? 2.2 : -3);
+      shipAnchor.scale.setScalar(quality === 'mobile' ? 0.55 : 0.75);
       shipAnchor.add(ship.root);
 
       scene.add(tunnel.root, entityField.root, streaks.points, shipAnchor);
-      scene.add(new THREE.HemisphereLight(0x72cfff, 0x160016, 1.45));
-      const key = new THREE.DirectionalLight(0xb7eaff, 2.4);
+      scene.add(new THREE.HemisphereLight(0x72cfff, 0x160016, 0.82));
+      const key = new THREE.DirectionalLight(0xb7eaff, 1.45);
       key.position.set(2.5, 7, 5);
       scene.add(key);
-      const magentaFill = new THREE.PointLight(0xff20c8, 8, 28, 1.6);
+      const magentaFill = new THREE.PointLight(0xff20c8, 2.4, 28, 1.6);
       magentaFill.position.set(-3.5, -0.5, 2);
       scene.add(magentaFill);
-      const cyanFill = new THREE.PointLight(0x00cfff, 7, 34, 1.7);
+      const cyanFill = new THREE.PointLight(0x00cfff, 2.7, 34, 1.7);
       cyanFill.position.set(3.2, 1.8, -6);
       scene.add(cyanFill);
 
       const postFxFactory = options.createPostFx ?? createPostFx;
       try {
         postFx = postFxFactory(renderer, scene, camera, {
-          enabled: true,
+          enabled: quality === 'mobile',
           quality,
           width,
           height,
@@ -300,7 +298,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     const aspect = width / height;
     target.camera.aspect = aspect;
     target.camera.updateProjectionMatrix();
-    target.shipAnchor.scale.setScalar(target.quality === 'mobile' ? 0.55 : 0.76);
+    target.shipAnchor.scale.setScalar(target.quality === 'mobile' ? 0.55 : 0.75);
   }
 
   function reconcile(target: SceneGraph, deltaSeconds: number): void {
@@ -324,7 +322,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     const portrait = target.camera.aspect < 0.8;
     const cameraTracking = portrait ? 0.84 : 0.18;
     const lookTracking = portrait ? 0.7 : 0.05;
-    target.camera.position.set(shipX * cameraTracking, portrait ? 1.2 : 1.45, portrait ? 10.4 : 8.8);
+    target.camera.position.set(shipX * cameraTracking, portrait ? 1.2 : 1.45, portrait ? 10.4 : 5.2);
     lookTarget.set(shipX * lookTracking, -0.45, -20);
     target.camera.lookAt(lookTarget);
   }
@@ -346,7 +344,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     if (graph && quality !== graph.quality) replaceGraph(quality, width, height);
     applyCameraLayout(graph, width, height);
     const portraitOrMobile = quality === 'mobile' || height > width;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, portraitOrMobile ? 1.35 : 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, portraitOrMobile ? 1.35 : 0.5));
     renderer.setSize(width, height);
     graph.postFx.setSize(width, height);
   }

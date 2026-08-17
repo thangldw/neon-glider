@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { NeonMaterials } from './materials';
 
 export interface NeonShip {
@@ -33,6 +34,13 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   const root = new THREE.Group();
   root.name = 'neon-ship';
   const geometries = new Set<THREE.BufferGeometry>();
+  const shipMetal = materials.metal.clone();
+  shipMetal.color.setHex(0x46689c);
+  shipMetal.emissive.setHex(0x0a1c4c);
+  shipMetal.emissiveIntensity = 0.72;
+  shipMetal.metalness = 0.76;
+  shipMetal.roughness = 0.35;
+  shipMetal.wireframe = false;
 
   function own<T extends THREE.BufferGeometry>(geometry: T): T {
     geometries.add(geometry);
@@ -60,27 +68,49 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   engineGeometry.rotateX(Math.PI / 2);
   const glowGeometry = own(new THREE.CylinderGeometry(0.23, 0.23, 0.12, 8));
   glowGeometry.rotateX(Math.PI / 2);
-  const cockpitGeometry = own(new THREE.ConeGeometry(0.43, 1.38, 5));
-  cockpitGeometry.rotateX(-Math.PI / 2);
+  const cockpitCore = new THREE.ConeGeometry(0.43, 1.38, 5);
+  cockpitCore.rotateX(-Math.PI / 2);
+  const cockpitParts: THREE.BufferGeometry[] = [cockpitCore];
+  const panelTransform = new THREE.Object3D();
+  for (const [x, y, z, sx, sy, sz, rotationY] of [
+    [0, -0.03, 0.77, 0.14, 0.055, 1.35, 0],
+    [-0.72, -0.28, 1.02, 0.78, 0.055, 0.075, -0.36],
+    [0.72, -0.28, 1.02, 0.78, 0.055, 0.075, 0.36],
+  ] as const) {
+    panelTransform.position.set(x, y, z);
+    panelTransform.scale.set(sx, sy, sz);
+    panelTransform.rotation.set(0, rotationY, 0);
+    panelTransform.updateMatrix();
+    cockpitParts.push(new THREE.BoxGeometry(1, 1, 1).applyMatrix4(panelTransform.matrix));
+  }
+  const mergedCockpitGeometry = mergeGeometries(cockpitParts, false);
+  for (const part of cockpitParts) part.dispose();
+  if (!mergedCockpitGeometry) throw new Error('Unable to construct ship panel geometry');
+  const cockpitGeometry = own(mergedCockpitGeometry);
   const trailGeometry = own(new THREE.CylinderGeometry(0.1, 0.31, 3.5, 8, 1, true));
   trailGeometry.rotateX(Math.PI / 2);
 
-  add('fuselage', fuselageGeometry, materials.metal, [0, 0, -0.1]);
-  add('wing-right', wingGeometry, materials.metal, [0.12, -0.08, 0]);
-  const leftWing = add('wing-left', wingGeometry, materials.metal, [-0.12, -0.08, 0]);
+  const panelMarker = new THREE.Group();
+  panelMarker.name = 'ship-panel-lights';
+  panelMarker.userData.panelCount = 3;
+  root.add(panelMarker);
+
+  add('fuselage', fuselageGeometry, shipMetal, [0, 0, -0.1]);
+  add('wing-right', wingGeometry, shipMetal, [0.12, -0.08, 0]);
+  const leftWing = add('wing-left', wingGeometry, shipMetal, [-0.12, -0.08, 0]);
   leftWing.scale.x = -1;
 
-  const armorSpine = add('armor-spine', unitBox, materials.metal, [0, 0.23, 0.1]);
+  const armorSpine = add('armor-spine', unitBox, shipMetal, [0, 0.23, 0.1]);
   armorSpine.scale.set(0.42, 0.34, 2.15);
-  const armorLeft = add('armor-left', unitBox, materials.metal, [-0.58, 0.02, 0.35]);
+  const armorLeft = add('armor-left', unitBox, shipMetal, [-0.58, 0.02, 0.35]);
   armorLeft.scale.set(0.45, 0.32, 1.55);
   armorLeft.rotation.y = -0.16;
-  const armorRight = add('armor-right', unitBox, materials.metal, [0.58, 0.02, 0.35]);
+  const armorRight = add('armor-right', unitBox, shipMetal, [0.58, 0.02, 0.35]);
   armorRight.scale.set(0.45, 0.32, 1.55);
   armorRight.rotation.y = 0.16;
 
-  add('engine-left', engineGeometry, materials.metal, [-1.12, -0.12, 0.72]);
-  add('engine-right', engineGeometry, materials.metal, [1.12, -0.12, 0.72]);
+  add('engine-left', engineGeometry, shipMetal, [-1.12, -0.12, 0.72]);
+  add('engine-right', engineGeometry, shipMetal, [1.12, -0.12, 0.72]);
   const glowLeft = add('engine-glow-left', glowGeometry, materials.magenta, [-1.12, -0.12, 1.38]);
   const glowRight = add('engine-glow-right', glowGeometry, materials.magenta, [1.12, -0.12, 1.38]);
   add('cockpit-light', cockpitGeometry, materials.cyan, [0, 0.45, -0.72]);
@@ -138,6 +168,7 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
       disposed = true;
       root.clear();
       for (const geometry of geometries) geometry.dispose();
+      shipMetal.dispose();
     },
   };
 }

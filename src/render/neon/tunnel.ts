@@ -103,10 +103,12 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
 
   const ribs = new THREE.Group();
   ribs.name = 'tunnel-ribs';
-  const cyanRibs = new THREE.InstancedMesh(unitBox, materials.cyan, segmentCount * 4);
+  const cyanRibs = new THREE.InstancedMesh(unitBox, materials.cyan, segmentCount * 8);
   cyanRibs.name = 'cyan-ribs';
-  const magentaRibs = new THREE.InstancedMesh(unitBox, materials.magenta, segmentCount * 4);
+  cyanRibs.userData.railInstanceCount = segmentCount * 4;
+  const magentaRibs = new THREE.InstancedMesh(unitBox, materials.magenta, segmentCount * 8);
   magentaRibs.name = 'magenta-ribs';
+  magentaRibs.userData.railInstanceCount = segmentCount * 4;
   ribs.add(cyanRibs, magentaRibs);
 
   const wallGroup = new THREE.Group();
@@ -149,6 +151,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const loopLength = segmentCount * SEGMENT_SPACING;
   const cyanSegments = new Uint8Array(cyanRibs.count);
   const magentaSegments = new Uint8Array(magentaRibs.count);
+  const cyanOffsets = new Float32Array(cyanRibs.count);
+  const magentaOffsets = new Float32Array(magentaRibs.count);
   const wallSegments = new Uint8Array(wallPanels.count);
   const floorSegments = new Uint8Array(floorPanels.count);
   let shownGate = 1;
@@ -157,7 +161,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   function segmentZ(segment: number, phase: number): number {
     let ahead = ((segment * SEGMENT_SPACING - phase) % loopLength + loopLength) % loopLength;
     if (ahead === 0) ahead = loopLength;
-    return -ahead;
+    return SEGMENT_SPACING / 2 - ahead;
   }
 
   function initializeSegments(): void {
@@ -171,7 +175,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       for (let edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 1) {
         const mesh = (segment + edgeIndex) % 2 === 0 ? cyanRibs : magentaRibs;
         const index = mesh === cyanRibs ? cyanIndex++ : magentaIndex++;
-        setBoxMatrix(mesh, index, edges[edgeIndex], ribZ, 0.1, 0.14);
+        setBoxMatrix(mesh, index, edges[edgeIndex], ribZ, 0.06, 0.12);
         (mesh === cyanRibs ? cyanSegments : magentaSegments)[index] = segment;
         if (edgeIndex !== 5) {
           setBoxMatrix(wallPanels, wallIndex, edges[edgeIndex], ribZ - SEGMENT_SPACING / 2, 0.16, SEGMENT_SPACING * 0.88);
@@ -188,6 +192,25 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
         floorSegments[floorIndex] = segment;
         floorIndex += 1;
       }
+      for (const [mesh, x, y, segments, offsets] of [
+        [cyanRibs, -1.5, FLOOR_Y + 0.1, cyanSegments, cyanOffsets],
+        [cyanRibs, 5.72, -0.9, cyanSegments, cyanOffsets],
+        [cyanRibs, -2.6, 3.45, cyanSegments, cyanOffsets],
+        [cyanRibs, -5.1, 1.4, cyanSegments, cyanOffsets],
+        [magentaRibs, 1.5, FLOOR_Y + 0.1, magentaSegments, magentaOffsets],
+        [magentaRibs, -5.72, -0.9, magentaSegments, magentaOffsets],
+        [magentaRibs, 2.6, 3.45, magentaSegments, magentaOffsets],
+        [magentaRibs, 5.1, 1.4, magentaSegments, magentaOffsets],
+      ] as const) {
+        scratchPosition.set(x, y, ribZ - SEGMENT_SPACING / 2);
+        scratchQuaternion.identity();
+        scratchScale.set(0.045, 0.045, SEGMENT_SPACING * 0.72);
+        scratchMatrix.compose(scratchPosition, scratchQuaternion, scratchScale);
+        const index = mesh === cyanRibs ? cyanIndex++ : magentaIndex++;
+        mesh.setMatrixAt(index, scratchMatrix);
+        segments[index] = segment;
+        offsets[index] = -SEGMENT_SPACING / 2;
+      }
     }
     cyanRibs.instanceMatrix.needsUpdate = true;
     magentaRibs.instanceMatrix.needsUpdate = true;
@@ -199,19 +222,20 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     mesh: THREE.InstancedMesh,
     segments: Uint8Array,
     phase: number,
-    zOffset: number,
+    zOffset: number | Float32Array,
   ): void {
     const matrices = mesh.instanceMatrix.array;
     for (let instance = 0; instance < segments.length; instance += 1) {
-      matrices[instance * 16 + 14] = segmentZ(segments[instance], phase) + zOffset;
+      matrices[instance * 16 + 14] = segmentZ(segments[instance], phase)
+        + (typeof zOffset === 'number' ? zOffset : zOffset[instance]);
     }
     mesh.instanceMatrix.needsUpdate = true;
   }
 
   function updateSegments(distance: number): void {
     const phase = ((distance % loopLength) + loopLength) % loopLength;
-    updateInstanceZ(cyanRibs, cyanSegments, phase, 0);
-    updateInstanceZ(magentaRibs, magentaSegments, phase, 0);
+    updateInstanceZ(cyanRibs, cyanSegments, phase, cyanOffsets);
+    updateInstanceZ(magentaRibs, magentaSegments, phase, magentaOffsets);
     updateInstanceZ(wallPanels, wallSegments, phase, -SEGMENT_SPACING / 2);
     updateInstanceZ(floorPanels, floorSegments, phase, -SEGMENT_SPACING / 2);
   }

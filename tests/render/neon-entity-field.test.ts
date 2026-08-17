@@ -3,6 +3,23 @@ import { expect, it, vi } from 'vitest';
 import { createEntityField } from '../../src/render/neon/entity-field';
 import { createNeonMaterials } from '../../src/render/neon/materials';
 
+it('batches each entity kind into one instanced draw', () => {
+  const materials = createNeonMaterials();
+  const field = createEntityField(materials);
+  field.sync([
+    { id: 'cube', kind: 'cube', lane: 0, distance: 50, segment: 0 },
+    { id: 'prism', kind: 'prism', lane: 1, distance: 60, segment: 1 },
+    { id: 'wall', kind: 'wall', lane: 2, distance: 70, segment: 2 },
+    { id: 'crystal', kind: 'crystal', lane: 1, distance: 80, segment: 3 },
+  ], 0);
+  const batches = field.root.children.filter((child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh);
+
+  expect(batches).toHaveLength(4);
+  expect(batches.map(({ count }) => count)).toEqual([1, 1, 1, 1]);
+  field.dispose();
+  materials.dispose();
+});
+
 it('reuses meshes by deterministic entity id and removes stale entities', () => {
   const materials = createNeonMaterials();
   const field = createEntityField(materials);
@@ -62,9 +79,10 @@ it('animates crystals and idempotently disposes only field-owned geometry', () =
   const field = createEntityField(materials);
   const crystal = { id: 'crystal', kind: 'crystal' as const, lane: 1 as const, distance: 100, segment: 3 };
   field.sync([crystal], 10);
-  const mesh = field.root.getObjectByName(crystal.id) as THREE.Mesh;
+  const mesh = field.root.getObjectByName(crystal.id)!;
   const startingRotation = mesh.rotation.y;
-  const geometryDispose = vi.spyOn(mesh.geometry, 'dispose');
+  const crystalBatch = field.root.getObjectByName('crystal-entity-batch') as THREE.InstancedMesh;
+  const geometryDispose = vi.spyOn(crystalBatch.geometry, 'dispose');
 
   field.sync([crystal], 20);
   expect(mesh.rotation.y).not.toBe(startingRotation);

@@ -15,6 +15,10 @@ export interface PerformanceSnapshot {
   maxTextures: number;
 }
 
+export interface PerfEvidence extends PerformanceSnapshot {
+  project: 'desktop-chromium' | 'mobile-chromium';
+}
+
 export interface PerfMonitor {
   record(timestampMs: number, renderer: RendererDiagnostics): void;
   reset(): void;

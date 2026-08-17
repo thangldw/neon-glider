@@ -23,6 +23,13 @@ it('builds the armored ship silhouette from named procedural parts', () => {
   }
   expect(ship.root.getObjectByName('wing-left')!.position.x).toBeLessThan(0);
   expect(ship.root.getObjectByName('wing-right')!.position.x).toBeGreaterThan(0);
+  expect(ship.root.getObjectByName('ship-panel-lights')?.userData.panelCount).toBe(3);
+  const fuselageMaterial = (ship.root.getObjectByName('fuselage') as THREE.Mesh).material as THREE.MeshStandardMaterial;
+  const shipTone = { h: 0, s: 0, l: 0 };
+  fuselageMaterial.color.getHSL(shipTone);
+  expect(fuselageMaterial).not.toBe(materials.metal);
+  expect(fuselageMaterial.wireframe).toBe(false);
+  expect(shipTone.l).toBeGreaterThan(0.16);
 
   ship.dispose();
   materials.dispose();
@@ -59,6 +66,8 @@ it('idempotently disposes owned geometry without disposing the shared palette', 
   const materials = createNeonMaterials();
   const materialDispose = vi.spyOn(materials.cyan, 'dispose');
   const ship = createNeonShip(materials);
+  const shipMaterial = (ship.root.getObjectByName('fuselage') as THREE.Mesh).material as THREE.Material;
+  const shipMaterialDispose = vi.spyOn(shipMaterial, 'dispose');
   const geometries = new Set<THREE.BufferGeometry>();
   let meshCount = 0;
   ship.root.traverse((object) => {
@@ -74,6 +83,7 @@ it('idempotently disposes owned geometry without disposing the shared palette', 
 
   expect(geometries.size).toBeLessThan(meshCount);
   for (const spy of geometryDispose) expect(spy).toHaveBeenCalledOnce();
+  expect(shipMaterialDispose).toHaveBeenCalledOnce();
   expect(materialDispose).not.toHaveBeenCalled();
   materials.dispose();
 });

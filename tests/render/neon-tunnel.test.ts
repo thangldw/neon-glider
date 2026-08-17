@@ -56,13 +56,21 @@ function withCanvasContext<T>(run: () => T): T {
 it('creates a bounded recycled tunnel with named gate and floor groups', () => withCanvasContext(() => {
   const materials = createNeonMaterials();
   const tunnel = createNeonTunnel({ quality: 'desktop', materials });
+  const firstRib = tunnel.root.getObjectByName('cyan-ribs') as THREE.InstancedMesh;
+  const firstRibMatrix = new THREE.Matrix4();
+  const firstRibScale = new THREE.Vector3();
+  firstRib.getMatrixAt(0, firstRibMatrix);
+  firstRibMatrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), firstRibScale);
 
   expect(tunnel.root.getObjectByName('tunnel-ribs')).toBeTruthy();
   expect(tunnel.root.getObjectByName('wall-panels')).toBeTruthy();
   expect(tunnel.root.getObjectByName('floor-panels')).toBeTruthy();
+  expect((tunnel.root.getObjectByName('cyan-ribs') as THREE.InstancedMesh).userData.railInstanceCount).toBe(96);
+  expect((tunnel.root.getObjectByName('magenta-ribs') as THREE.InstancedMesh).userData.railInstanceCount).toBe(96);
   expect(tunnel.root.getObjectByName('active-gate')).toBeTruthy();
   expect(tunnel.root.getObjectByName('gate-number')).toBeTruthy();
   expect(tunnel.segmentCount).toBe(24);
+  expect(firstRibScale.y).toBeLessThanOrEqual(0.065);
 
   const children = tunnel.root.children.length;
   tunnel.update(1_000, 12);
@@ -81,7 +89,7 @@ it('uses instancing and the reduced mobile segment budget', () => withCanvasCont
   });
 
   expect(tunnel.segmentCount).toBe(16);
-  expect(instances.length).toBeGreaterThanOrEqual(4);
+  expect(instances).toHaveLength(5);
   tunnel.dispose();
   materials.dispose();
 }));
@@ -96,6 +104,26 @@ it('updates the existing gate label texture instead of allocating scene objects'
 
   expect((label.material as THREE.MeshBasicMaterial).map).toBe(texture);
   expect(tunnel.root.getObjectByName('active-gate')!.position.z).toBe(-250);
+  tunnel.dispose();
+  materials.dispose();
+}));
+
+it('keeps a tunnel rib close enough to enclose the chase camera', () => withCanvasContext(() => {
+  const materials = createNeonMaterials();
+  const tunnel = createNeonTunnel({ quality: 'desktop', materials });
+  tunnel.update(145, 1);
+  const matrix = new THREE.Matrix4();
+  let closestZ = Number.NEGATIVE_INFINITY;
+  for (const name of ['cyan-ribs', 'magenta-ribs']) {
+    const mesh = tunnel.root.getObjectByName(name) as THREE.InstancedMesh;
+    for (let index = 0; index < mesh.count; index += 1) {
+      mesh.getMatrixAt(index, matrix);
+      closestZ = Math.max(closestZ, matrix.elements[14]);
+    }
+  }
+
+  expect(closestZ).toBeGreaterThanOrEqual(-4);
+  expect(closestZ).toBeLessThanOrEqual(0);
   tunnel.dispose();
   materials.dispose();
 }));

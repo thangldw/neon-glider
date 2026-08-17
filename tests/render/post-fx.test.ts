@@ -44,7 +44,7 @@ it('uses bloom when composer creation succeeds and direct rendering when it fail
   expect(composedFixture.composer.render).toHaveBeenCalledOnce();
   expect(renderer.render).not.toHaveBeenCalled();
   expect(composedFixture.passes.map((pass) => (pass as { constructor: { name: string } }).constructor.name))
-    .toEqual(['RenderPass', 'UnrealBloomPass', 'OutputPass']);
+    .toEqual(['RenderPass', 'ShaderPass', 'OutputPass']);
   composed.dispose();
 
   const fallback = createPostFx(renderer, scene, camera, {
@@ -92,14 +92,39 @@ it('uses reduced internal bloom resolution on mobile and disposes once', () => {
     createComposer: () => fixture.composer,
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(268, 595);
-  const bloom = fixture.passes[1] as { strength: number; radius: number; threshold: number };
-  expect(bloom).toMatchObject({ strength: 0.9, radius: 0.45, threshold: 0.18 });
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(165, 366);
+  const glow = fixture.passes[1] as { uniforms: Record<string, { value: number | THREE.Vector2 }> };
+  expect(glow.uniforms.strength.value).toBe(0.28);
+  expect(glow.uniforms.threshold.value).toBe(0.7);
   fx.setSize(400, 800);
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(260, 520);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(160, 320);
+  expect(glow.uniforms.resolution.value).toMatchObject({ x: 160, y: 320 });
   fx.dispose();
   fx.dispose();
   expect(fixture.composer.dispose).toHaveBeenCalledOnce();
+});
+
+it('uses a bounded desktop bloom buffer and restrained highlight response', () => {
+  const fixture = composerFixture();
+  let target: THREE.WebGLRenderTarget | undefined;
+  const fx = createPostFx(rendererFixture(), new THREE.Scene(), new THREE.PerspectiveCamera(), {
+    enabled: true,
+    quality: 'desktop',
+    width: 1_536,
+    height: 1_024,
+    createComposer: (_renderer, renderTarget) => {
+      target = renderTarget;
+      return fixture.composer;
+    },
+  });
+
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(614, 410);
+  expect(target?.texture.type).toBe(THREE.UnsignedByteType);
+  const glow = fixture.passes[1] as { uniforms: Record<string, { value: number | THREE.Vector2 }> };
+  expect(glow.uniforms.strength.value).toBe(0.34);
+  expect(glow.uniforms.threshold.value).toBe(0.68);
+  expect(glow.uniforms.resolution.value).toMatchObject({ x: 614, y: 410 });
+  fx.dispose();
 });
 
 it('renders directly when bloom is disabled', () => {
@@ -118,4 +143,38 @@ it('renders directly when bloom is disabled', () => {
 
   expect(createComposer).not.toHaveBeenCalled();
   expect(renderer.render).toHaveBeenCalledWith(scene, camera);
+});
+
+it('preserves actual draw submissions across the complete post-processing frame', () => {
+  const renderer = rendererFixture() as RendererLike & {
+    info: {
+      autoReset: boolean;
+      reset: ReturnType<typeof vi.fn>;
+      render: { calls: number };
+      memory: { geometries: number; textures: number };
+    };
+  };
+  renderer.info = {
+    autoReset: true,
+    reset: vi.fn(() => { renderer.info.render.calls = 0; }),
+    render: { calls: 0 },
+    memory: { geometries: 0, textures: 0 },
+  };
+  const fixture = composerFixture();
+  (fixture.composer.render as ReturnType<typeof vi.fn>).mockImplementation(() => {
+    renderer.info.render.calls = 31;
+  });
+  const fx = createPostFx(renderer, new THREE.Scene(), new THREE.PerspectiveCamera(), {
+    enabled: true,
+    width: 800,
+    height: 600,
+    createComposer: () => fixture.composer,
+  });
+
+  fx.render();
+
+  expect(renderer.info.autoReset).toBe(false);
+  expect(renderer.info.reset).toHaveBeenCalledOnce();
+  expect(renderer.info.render.calls).toBe(31);
+  fx.dispose();
 });
