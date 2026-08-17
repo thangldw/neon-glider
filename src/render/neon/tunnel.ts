@@ -133,6 +133,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const floorSeams = new THREE.InstancedMesh(unitBox, materials.cyan, segmentCount * 2);
   floorSeams.name = 'floor-seam-instances';
   floorSeams.frustumCulled = false;
+  recessPanels.visible = quality === 'desktop';
+  floorSeams.visible = quality === 'desktop';
 
   const panelDetailMaterial = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -171,6 +173,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   }
   gateAccent.instanceMatrix.needsUpdate = true;
   gateAccent.frustumCulled = false;
+  gateAccent.visible = quality === 'desktop';
   const gateTexture = createGateTexture(1);
   const gateLabelMaterial = new THREE.MeshBasicMaterial({
     map: gateTexture,
@@ -183,6 +186,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const gateInnerGlow = new THREE.Mesh(gateGlowGeometry, materials.gateGlass);
   gateInnerGlow.name = 'gate-inner-glow';
   gateInnerGlow.position.set(0, 0.15, -0.45);
+  gateInnerGlow.visible = false;
   activeGate.add(gateFrame, gateAccent, gateInnerGlow, gateLabel);
   root.add(ribs, wallGroup, floorGroup, recessPanels, floorSeams, panelDetails, activeGate);
 
@@ -340,7 +344,9 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       const safeDistance = Number.isFinite(distance) ? distance : 0;
       const safeGate = Number.isSafeInteger(nextGate) && nextGate > 0 ? nextGate : 1;
       updateSegments(safeDistance);
-      activeGate.position.z = -(safeGate * GATE_DISTANCE - safeDistance) - 1;
+      const gateGap = safeGate * GATE_DISTANCE - safeDistance;
+      activeGate.position.z = -gateGap - 1;
+      gateInnerGlow.visible = gateGap >= 0 && gateGap <= 18;
       if (safeGate !== shownGate) {
         shownGate = safeGate;
         drawGateNumber(gateTexture, safeGate);

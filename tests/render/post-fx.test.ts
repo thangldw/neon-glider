@@ -120,13 +120,13 @@ it('uses the approved desktop Unreal bloom with scaled bloom buffers', () => {
     },
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(538, 358);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(461, 307);
   expect(target?.texture.type).toBe(THREE.UnsignedByteType);
   const glow = fixture.passes[1] as import('three/examples/jsm/postprocessing/UnrealBloomPass.js').UnrealBloomPass;
   expect(glow.strength).toBe(0.44);
   expect(glow.radius).toBe(0.34);
   expect(glow.threshold).toBe(0.58);
-  expect(glow.renderTargetBright).toMatchObject({ width: 215, height: 143 });
+  expect(glow.renderTargetBright).toMatchObject({ width: 185, height: 123 });
   fx.dispose();
 });
 

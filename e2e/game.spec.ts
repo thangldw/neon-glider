@@ -26,7 +26,7 @@ type E2ESnapshot = {
   profile: { highScore: number; longestDistance: number; runCount: number; reducedMotion: boolean };
 };
 
-const artifactRoot = path.resolve('.superpowers/sdd/2026-08-17-neon-glider-redesign/artifacts');
+const artifactRoot = path.resolve('.superpowers/sdd/2026-08-17-neon-glider-visual-polish/artifacts');
 
 function artifactDirectory(testInfo: TestInfo): string {
   return path.join(artifactRoot, testInfo.project.name);
@@ -339,6 +339,9 @@ test('production generation blocks every lane while preserving an adjacent reach
 
 test('keeps the full ship visible in all lanes without horizontal overflow', async ({ page }) => {
   await startRun(page, 37);
+  await expect(page.locator('.energy-track')).toBeVisible();
+  await expect(page.locator('[data-distance-unit]')).toHaveText('m');
+  await expect(page.locator('canvas')).toBeVisible();
   const renderScale = await page.locator('canvas').evaluate((element) => {
     const canvas = element as HTMLCanvasElement;
     return {
@@ -384,16 +387,32 @@ test('loads production assets from the static /neon-glider/ base path', async ({
 
 test('captures the required player-visible states', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    const screenshotReadbackWarning = message.type() === 'warning'
+      && message.text().includes('GPU stall due to ReadPixels');
+    if (!screenshotReadbackWarning && (message.type() === 'warning' || message.type() === 'error')) {
+      consoleProblems.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
   const directory = artifactDirectory(testInfo);
   await seedNextRun(page, 41);
   await page.clock.install({ time: new Date('2026-08-17T00:00:00Z') });
   await page.goto('?e2e=1');
+  await expect(page.locator('.menu-kicker')).toHaveText('ENDLESS NEON RUNNER');
   await screenshot(page, directory, 'menu.png');
   await page.getByRole('button', { name: 'Bắt đầu' }).click();
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   await setSimulationFrozen(page, true);
-  await advanceSafelyTo(page, 242);
+  await expect(page.locator('.energy-track')).toBeVisible();
+  await expect(page.locator('[data-distance-unit]')).toHaveText('m');
+  await expect(page.locator('canvas')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => document.documentElement.clientWidth),
+  );
+  await advanceSafelyTo(page, 190);
   await setLane(page, 1);
   await screenshot(page, directory, 'gameplay-center.png');
   await setLane(page, 0);
@@ -426,20 +445,17 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   await waitForScreen(page, 'playing', 10_000);
   await setSimulationFrozen(page, true);
   await screenshot(page, directory, 'reduced-motion.png');
-
-  const fallback = await page.context().newPage();
-  await fallback.addInitScript(() => {
-    const original = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function patched(this: HTMLCanvasElement, type: string, ...args: unknown[]) {
-      if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') return null;
-      return original.call(this, type as '2d', ...args as []) as RenderingContext | null;
-    } as typeof HTMLCanvasElement.prototype.getContext;
+  await page.locator('canvas').evaluate((canvas) => {
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
   });
-  await fallback.goto('http://127.0.0.1:4173/neon-glider/?e2e=1');
-  await fallback.getByRole('button', { name: 'Bắt đầu' }).click();
-  await expect(fallback.locator('[data-screen="fatal"]')).toBeVisible();
-  await screenshot(fallback, directory, 'webgl-fallback.png');
-  await fallback.close();
+  await waitForScreen(page, 'paused');
+  await page.locator('canvas').evaluate((canvas) => canvas.dispatchEvent(new Event('webglcontextrestored')));
+  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await page.clock.fastForward(3_000);
+  await waitForScreen(page, 'playing', 10_000);
+  await setSimulationFrozen(page, true);
+  await screenshot(page, directory, 'restored-run.png');
+  expect(consoleProblems).toEqual([]);
 });
 
 test('records bounded real-render performance evidence', async ({ browser, page }, testInfo) => {
@@ -499,5 +515,6 @@ test('records bounded real-render performance evidence', async ({ browser, page 
   expect(measured.maxDrawCalls).toBeGreaterThan(10);
   expect(measured.longestSlowFrameStreak).toBeLessThanOrEqual(3);
   expect(measured.maxDrawCalls).toBeLessThanOrEqual(testInfo.project.name === 'mobile-chromium' ? 45 : 60);
+  expect(measured.maxGeometries).toBeLessThan(45);
   expect(inputLatencyMs).toBeLessThan(500);
 });

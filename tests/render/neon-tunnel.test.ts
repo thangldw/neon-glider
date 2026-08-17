@@ -113,7 +113,23 @@ it('uses instancing and the reduced mobile segment budget', () => withCanvasCont
 
   expect(instances).toHaveLength(9);
   expect(depthLayers.reduce((total, mesh) => total + mesh.count, 0)).toBeLessThan(220);
+  expect(depthLayers.every((mesh) => mesh.visible === false)).toBe(true);
   expect(tunnel.root.getObjectByName('panel-detail-instances')).toMatchObject({ visible: false });
+  expect(tunnel.root.getObjectByName('active-gate-accent')).toMatchObject({ visible: false });
+  tunnel.dispose();
+  materials.dispose();
+}));
+
+it('activates transmissive gate glass only for the bounded passage flash', () => withCanvasContext(() => {
+  const materials = createNeonMaterials();
+  const tunnel = createNeonTunnel({ quality: 'desktop', materials });
+  const glow = tunnel.root.getObjectByName('gate-inner-glow') as THREE.Mesh;
+
+  tunnel.update(190, 1);
+  expect(glow.visible).toBe(false);
+  tunnel.update(247, 1);
+  expect(glow.visible).toBe(true);
+
   tunnel.dispose();
   materials.dispose();
 }));
