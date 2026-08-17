@@ -5,16 +5,17 @@ function actionHandlers() {
   return { left: vi.fn(), right: vi.fn(), pause: vi.fn() };
 }
 
-it('maps supported keyboard actions once and prevents their browser default', () => {
+it('maps supported keyboard actions on the bound playfield and prevents their browser default', () => {
   const handlers = actionHandlers();
-  const dispose = bindActions(window, handlers);
+  const playfield = document.createElement('div');
+  const dispose = bindActions(playfield, handlers);
   const left = new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true });
   const right = new KeyboardEvent('keydown', { key: 'd', cancelable: true });
   const pause = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 
-  window.dispatchEvent(left);
-  window.dispatchEvent(right);
-  window.dispatchEvent(pause);
+  playfield.dispatchEvent(left);
+  playfield.dispatchEvent(right);
+  playfield.dispatchEvent(pause);
 
   expect(handlers.left).toHaveBeenCalledOnce();
   expect(handlers.right).toHaveBeenCalledOnce();
@@ -27,9 +28,10 @@ it('maps supported keyboard actions once and prevents their browser default', ()
 
 it('ignores key repeats and unrelated keys', () => {
   const handlers = actionHandlers();
-  const dispose = bindActions(window, handlers);
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', repeat: true, cancelable: true }));
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', cancelable: true }));
+  const playfield = document.createElement('div');
+  const dispose = bindActions(playfield, handlers);
+  playfield.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', repeat: true, cancelable: true }));
+  playfield.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', cancelable: true }));
   expect(handlers.left).not.toHaveBeenCalled();
   expect(handlers.right).not.toHaveBeenCalled();
   expect(handlers.pause).not.toHaveBeenCalled();
@@ -193,8 +195,9 @@ it('keeps the first legacy touch authoritative across a second start and non-act
 
 it('removes input listeners when disposed', () => {
   const handlers = actionHandlers();
-  const dispose = bindActions(window, handlers);
+  const playfield = document.createElement('div');
+  const dispose = bindActions(playfield, handlers);
   dispose();
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  playfield.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
   expect(handlers.right).not.toHaveBeenCalled();
 });

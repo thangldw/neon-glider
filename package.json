@@ -19,6 +19,7 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@phosphor-icons/web": "^2.1.2",
     "three": "^0.185.1"
   },
   "devDependencies": {

@@ -1,301 +1,191 @@
 import {
-  loadContent as loadBuiltContent,
-  loadContentReleaseState as loadBuiltContentReleaseState,
-} from '../content';
-import type { ContentReleaseState, HanziEntry, HskLevel } from '../content/types';
-import {
-  createPerfMonitor as createPerformanceMonitor,
+  createPerfMonitor,
   type PerformanceSnapshot,
-  type PerfMonitor,
 } from '../diagnostics/perf-overlay';
-import { bindActions as bindGameActions, type ActionHandlers } from '../input/actions';
+import { bindActions as bindRunnerActions } from '../input/actions';
 import {
-  createGameView as createThreeGameView,
-  MAX_FRAME_DELTA_SECONDS,
-  type GameView,
-  type GameViewOptions,
+  createRunnerView as createThreeRunnerView,
   type FramingDiagnostics,
-} from '../render/game-view';
-import { answerCurrent, createRun as createSimulationRun, moveLane } from '../simulation/run';
-import type { ProgressState, RunState } from '../simulation/types';
+  type RunnerView,
+  type RunnerViewOptions,
+} from '../render/runner-view';
 import {
-  createDefaultProgress,
-  loadProgress as loadStoredProgress,
-  saveProgress as saveStoredProgress,
-  updateMastery,
-} from '../storage/progress-storage';
+  clearRunner as clearStoredRunner,
+  loadRunner as loadStoredRunner,
+  saveRunner as saveStoredRunner,
+} from '../storage/runner-storage';
 import {
-  clearRun as clearStoredRun,
-  isRunState,
-  loadRun as loadStoredRun,
-  saveRun as saveStoredRun,
-} from '../storage/run-storage';
+  createDefaultProfile,
+  loadProfile as loadStoredProfile,
+  recordCompletedRun,
+  saveProfile as saveStoredProfile,
+  type RunnerProfile,
+} from '../storage/profile-storage';
+import { advanceRunner, createRunner, moveRunnerLane } from '../simulation/runner';
+import type { EndReason, Lane, RunnerState } from '../simulation/runner-types';
 import {
   createCountdownOverlay,
-  createFatalScreen,
   createGameScreen,
   createMenuScreen,
   createPauseOverlay,
-  createReviewScreen,
+  createResultScreen,
   createStorageWarning,
+  createWebGLFatalScreen,
   type GameScreen,
-  type GateChoice,
 } from './screens';
 
-export type AppScreen = 'menu' | 'countdown' | 'playing' | 'paused' | 'review' | 'fatal';
+export type AppScreen = 'menu' | 'countdown' | 'playing' | 'paused' | 'result' | 'fatal';
 
-type StorageUnavailableHandler = () => void;
+export interface PerfSnapshot extends PerformanceSnapshot {
+  framing: FramingDiagnostics;
+}
+
+export interface NeonGliderE2E {
+  snapshot(): { screen: AppScreen; run: RunnerState | null; profile: RunnerProfile };
+  setLane(lane: Lane): void;
+  advance(seconds: number): void;
+  forceEnd(reason: Exclude<EndReason, null>): void;
+  diagnostics(): PerfSnapshot | null;
+}
 
 export interface AppControllerDependencies {
-  loadContent?: () => HanziEntry[];
-  loadContentReleaseState?: () => ContentReleaseState;
-  loadProgress?: (onUnavailable: StorageUnavailableHandler) => ProgressState;
-  saveProgress?: (progress: ProgressState, onUnavailable: StorageUnavailableHandler) => boolean;
-  loadRun?: (onUnavailable: StorageUnavailableHandler) => RunState | null;
-  saveRun?: (run: RunState, onUnavailable: StorageUnavailableHandler) => boolean;
-  clearRun?: (onUnavailable: StorageUnavailableHandler) => void;
-  restoredRun?: RunState | null;
-  startRun?: (level: HskLevel) => RunState | void;
-  createGameView?: (container: HTMLElement, options?: GameViewOptions) => GameView;
-  bindActions?: (target: Window | HTMLElement, handlers: ActionHandlers) => () => void;
-  now?: () => number;
+  loadRunner?: (onUnavailable: () => void) => RunnerState | null;
+  saveRunner?: (run: RunnerState, onUnavailable: () => void) => boolean;
+  clearRunner?: (onUnavailable: () => void) => void;
+  loadProfile?: (onUnavailable: () => void) => RunnerProfile;
+  saveProfile?: (profile: RunnerProfile, onUnavailable: () => void) => boolean;
+  createRunnerView?: (container: HTMLElement, options?: RunnerViewOptions) => RunnerView;
+  bindActions?: typeof bindRunnerActions;
   createSeed?: () => number;
   requestFrame?: (callback: FrameRequestCallback) => number;
   cancelFrame?: (handle: number) => void;
-  prefersReducedMotion?: () => boolean;
-  questionDurationMs?: number;
-  enableTestHooks?: boolean;
-  enableDiagnostics?: boolean;
-  createPerfMonitor?: typeof createPerformanceMonitor;
-  perfMonitor?: PerfMonitor;
-}
-
-export interface AppControllerState {
-  screen: AppScreen;
-  run: RunState | null;
-  choices: readonly [GateChoice, GateChoice, GateChoice] | null;
+  enableTestApi?: boolean;
 }
 
 export interface AppController {
-  readonly root: HTMLElement;
-  readonly testHook?: AppTestHook;
+  root: HTMLElement;
+  getState(): { screen: AppScreen; run: RunnerState | null; profile: RunnerProfile };
+  test?: NeonGliderE2E;
   destroy(): void;
-  getState(): AppControllerState;
 }
 
-export interface AppTestSnapshot extends AppControllerState {
-  performance: PerformanceSnapshot;
-  reducedMotion: boolean;
-  questionDurationMs: number;
-  framing: FramingDiagnostics | null;
-}
+class FrameClock {
+  private anchor: number | null = null;
 
-function emptyPerformanceSnapshot(): PerformanceSnapshot {
-  return {
-    sampleCount: 0,
-    medianFrameTimeMs: 0,
-    worstFrameTimeMs: 0,
-    slowFrameCount: 0,
-    longestSlowFrameStreak: 0,
-    maxDrawCalls: 0,
-    maxGeometries: 0,
-    maxTextures: 0,
-  };
-}
+  accept(timestampMs: number): number {
+    if (!Number.isFinite(timestampMs)) return 0;
+    if (this.anchor === null) {
+      this.anchor = timestampMs;
+      return 0;
+    }
+    const delta = (timestampMs - this.anchor) / 1_000;
+    this.anchor = timestampMs;
+    return delta >= 0 && delta <= 0.25 ? delta : 0;
+  }
 
-export interface AppTestHook {
-  snapshot(): AppTestSnapshot;
-  answer(selectedId: string): boolean;
-  resetPerformance(): void;
-}
-
-const COUNTDOWN_SECONDS = 3;
-const QUESTION_DURATION_MS: Readonly<Record<HskLevel, number>> = { 1: 12_000, 2: 10_500, 3: 9_000 };
-
-/** Higher levels get less reading time without changing glider physics. */
-export function getQuestionDurationMs(level: HskLevel): number {
-  return QUESTION_DURATION_MS[level];
-}
-
-function safeBrowserProgress(onUnavailable: StorageUnavailableHandler): ProgressState {
-  try {
-    return loadStoredProgress(window.localStorage, onUnavailable);
-  } catch {
-    onUnavailable();
-    return createDefaultProgress();
+  reset(): void {
+    this.anchor = null;
   }
 }
 
-function safeBrowserRun(onUnavailable: StorageUnavailableHandler): RunState | null {
+type UnavailableHandler = () => void;
+
+function browserLoadRunner(onUnavailable: UnavailableHandler): RunnerState | null {
   try {
-    return loadStoredRun(window.sessionStorage, onUnavailable);
+    return loadStoredRunner(window.sessionStorage, onUnavailable);
   } catch {
     onUnavailable();
     return null;
   }
 }
 
-function safeSaveProgress(progress: ProgressState, onUnavailable: StorageUnavailableHandler): boolean {
+function browserSaveRunner(run: RunnerState, onUnavailable: UnavailableHandler): boolean {
   try {
-    return saveStoredProgress(window.localStorage, progress, onUnavailable);
+    return saveStoredRunner(window.sessionStorage, run, onUnavailable);
   } catch {
     onUnavailable();
     return false;
   }
 }
 
-function safeSaveRun(run: RunState, onUnavailable: StorageUnavailableHandler): boolean {
+function browserClearRunner(onUnavailable: UnavailableHandler): void {
   try {
-    return saveStoredRun(window.sessionStorage, run, onUnavailable);
+    clearStoredRunner(window.sessionStorage, onUnavailable);
+  } catch {
+    onUnavailable();
+  }
+}
+
+function browserLoadProfile(onUnavailable: UnavailableHandler): RunnerProfile {
+  try {
+    return loadStoredProfile(window.localStorage, onUnavailable);
+  } catch {
+    onUnavailable();
+    return createDefaultProfile();
+  }
+}
+
+function browserSaveProfile(profile: RunnerProfile, onUnavailable: UnavailableHandler): boolean {
+  try {
+    return saveStoredProfile(window.localStorage, profile, onUnavailable);
   } catch {
     onUnavailable();
     return false;
   }
 }
 
-function safeClearRun(onUnavailable: StorageUnavailableHandler): void {
-  try {
-    clearStoredRun(window.sessionStorage, onUnavailable);
-  } catch {
-    onUnavailable();
-  }
+function cloneRun(run: RunnerState | null): RunnerState | null {
+  return run ? {
+    ...run,
+    reachableLanes: [...run.reachableLanes],
+    entities: run.entities.map((entity) => ({ ...entity })),
+  } : null;
 }
 
-function hash(value: string): number {
-  let result = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    result ^= value.charCodeAt(index);
-    result = Math.imul(result, 0x01000193);
-  }
-  return result >>> 0;
-}
-
-/**
- * Level 1 uses broad deterministic distractors. Level 2 prefers equal glyph
- * length. Level 3 additionally prioritizes shared glyphs for closer visual
- * confusability. Hash order remains the stable tie-breaker.
- */
-export function scoreDistractorSimilarity(level: HskLevel, correct: HanziEntry, candidate: HanziEntry): number {
-  if (level === 1) return 0;
-  const correctGlyphs = Array.from(correct.term);
-  const candidateGlyphs = Array.from(candidate.term);
-  const lengthScore = Math.max(0, 10 - Math.abs(correctGlyphs.length - candidateGlyphs.length) * 5);
-  if (level === 2) return lengthScore;
-  const candidateSet = new Set(candidateGlyphs);
-  const sharedGlyphs = new Set(correctGlyphs.filter((glyph) => candidateSet.has(glyph))).size;
-  return lengthScore + sharedGlyphs * 20;
-}
-
-export function createGateChoices(
-  run: RunState,
-  entries: readonly HanziEntry[],
-  entriesById: ReadonlyMap<string, HanziEntry>,
-): [GateChoice, GateChoice, GateChoice] {
-  const correctId = run.questionIds[run.questionIndex];
-  const correct = entriesById.get(correctId);
-  if (!correct) throw new Error(`Missing question entry: ${correctId}`);
-  const salt = `${run.seed}:${run.questionIndex}`;
-  const uniqueTerms = new Map<string, HanziEntry>();
-  for (const entry of [...entries].sort((left, right) => left.sourceOrder - right.sourceOrder || left.id.localeCompare(right.id))) {
-    if (entry.level <= run.level && entry.term !== correct.term && !uniqueTerms.has(entry.term)) uniqueTerms.set(entry.term, entry);
-  }
-  const distractors = [...uniqueTerms.values()]
-    .sort((left, right) => scoreDistractorSimilarity(run.level, correct, right)
-      - scoreDistractorSimilarity(run.level, correct, left)
-      || hash(`${salt}:${left.id}`) - hash(`${salt}:${right.id}`)
-      || left.sourceOrder - right.sourceOrder)
-    .slice(0, 2);
-  if (distractors.length !== 2) throw new Error(`Need two distractors for HSK ${run.level}`);
-  const ordered = [correct, ...distractors]
-    .sort((left, right) => hash(`${salt}:lane:${left.id}`) - hash(`${salt}:lane:${right.id}`) || left.sourceOrder - right.sourceOrder)
-    .map(({ id, term }) => ({ id, term }));
-  const choices = ordered as [GateChoice, GateChoice, GateChoice];
-  if (new Set(choices.map(({ term }) => term)).size !== 3
-    || choices.filter(({ id }) => id === correct.id).length !== 1) {
-    throw new Error('Gate choices must contain three unique terms and exactly one correct ID');
-  }
-  return choices;
-}
-
-function isCompatibleRun(
-  run: RunState,
-  entries: readonly HanziEntry[],
-  entriesById: ReadonlyMap<string, HanziEntry>,
-): boolean {
-  if (!isRunState(run) || !run.questionIds.every((id) => entriesById.get(id)?.level === run.level)) return false;
-  try {
-    return run.answers.every((answer, questionIndex) => {
-      const selected = entriesById.get(answer.selectedId);
-      if (!selected || selected.level > run.level) return false;
-      const snapshot = { ...run, questionIndex };
-      return createGateChoices(snapshot, entries, entriesById).some(({ id }) => id === answer.selectedId);
-    });
-  } catch {
-    return false;
-  }
-}
-
-function promptFor(run: RunState, entriesById: ReadonlyMap<string, HanziEntry>): string {
-  const entry = entriesById.get(run.questionIds[run.questionIndex]);
-  if (!entry) throw new Error('Active question is unavailable');
-  return run.questionIndex % 2 === 0 ? entry.meaningsVi.join('; ') : entry.pinyin;
+function reducedMotionPreference(profile: RunnerProfile): boolean {
+  return profile.reducedMotion
+    || (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 }
 
 export function createAppController(
   root: HTMLElement,
   dependencies: AppControllerDependencies = {},
 ): AppController {
-  const loadEntries = dependencies.loadContent ?? loadBuiltContent;
-  const loadContentReleaseState = dependencies.loadContentReleaseState ?? loadBuiltContentReleaseState;
-  const loadProgress = dependencies.loadProgress ?? safeBrowserProgress;
-  const saveProgress = dependencies.saveProgress ?? safeSaveProgress;
-  const loadRun = dependencies.loadRun ?? safeBrowserRun;
-  const saveRun = dependencies.saveRun ?? safeSaveRun;
-  const clearRun = dependencies.clearRun ?? safeClearRun;
-  const createGameView = dependencies.createGameView ?? createThreeGameView;
-  const bindActions = dependencies.bindActions ?? bindGameActions;
-  const now = dependencies.now ?? Date.now;
-  const createSeed = dependencies.createSeed ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]);
-  const requestFrame = dependencies.requestFrame ?? requestAnimationFrame;
-  const cancelFrame = dependencies.cancelFrame ?? cancelAnimationFrame;
-  const prefersReducedMotion = dependencies.prefersReducedMotion
-    ?? (() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-  const questionDurationMs = () => dependencies.questionDurationMs ?? getQuestionDurationMs(run?.level ?? progress.selectedLevel);
+  const loadRunner = dependencies.loadRunner ?? browserLoadRunner;
+  const saveRunner = dependencies.saveRunner ?? browserSaveRunner;
+  const clearRunner = dependencies.clearRunner ?? browserClearRunner;
+  const loadProfile = dependencies.loadProfile ?? browserLoadProfile;
+  const saveProfile = dependencies.saveProfile ?? browserSaveProfile;
+  const createRunnerView = dependencies.createRunnerView ?? createThreeRunnerView;
+  const bindActions = dependencies.bindActions ?? bindRunnerActions;
+  const createSeed = dependencies.createSeed
+    ?? (() => window.crypto.getRandomValues(new Uint32Array(1))[0]);
+  const requestFrame = dependencies.requestFrame
+    ?? ((callback: FrameRequestCallback) => window.requestAnimationFrame(callback));
+  const cancelFrame = dependencies.cancelFrame
+    ?? ((handle: number) => window.cancelAnimationFrame(handle));
   const query = new URLSearchParams(window.location.search);
-  const enableTestHooks = dependencies.enableTestHooks
-    ?? query.get('e2e') === '1';
-  const developmentDiagnostics = import.meta.env.DEV && import.meta.env.MODE !== 'test';
-  const explicitDiagnostics = query.get('diagnostics') === '1';
-  const enableDiagnostics = dependencies.enableDiagnostics
-    ?? (developmentDiagnostics || explicitDiagnostics || enableTestHooks);
-  const perfMonitor = dependencies.perfMonitor
-    ?? (enableDiagnostics
-      ? (dependencies.createPerfMonitor ?? createPerformanceMonitor)({
-        visible: developmentDiagnostics || explicitDiagnostics,
-        host: document.body,
-      })
-      : null);
+  const enableTestApi = dependencies.enableTestApi ?? query.get('e2e') === '1';
+  const enableDiagnostics = enableTestApi || query.get('diagnostics') === '1';
+  const perfMonitor = enableDiagnostics
+    ? createPerfMonitor({ visible: query.get('diagnostics') === '1', host: document.body })
+    : null;
 
   let screen: AppScreen = 'menu';
-  let run: RunState | null = null;
-  let choices: [GateChoice, GateChoice, GateChoice] | null = null;
-  let progress = createDefaultProgress();
-  let entries: HanziEntry[] = [];
-  let contentReleaseState: ContentReleaseState = { reviewStatus: 'draft', releaseReady: false };
-  let entriesById = new Map<string, HanziEntry>();
+  let run: RunnerState | null = null;
+  let profile = createDefaultProfile();
   let gameScreen: GameScreen | null = null;
-  let gameView: GameView | null = null;
+  let view: RunnerView | null = null;
   let unbindActions: (() => void) | null = null;
   let frameHandle: number | null = null;
-  let frameAnchorSeconds: number | null = null;
-  let questionElapsedMs = 0;
-  let checkpointTimer: ReturnType<typeof setInterval> | null = null;
   let countdownTimer: ReturnType<typeof setInterval> | null = null;
-  let destroyed = false;
+  let checkpointAccumulator = 0;
   let storageUnavailable = false;
-  let resumeOnVisible = false;
-  let resumeAfterContextRestore = false;
-  let effectiveReducedMotion = false;
+  let completionRecorded = false;
+  let visibilitySuspended = false;
+  let contextSuspended = false;
+  let destroyed = false;
+  const frameClock = new FrameClock();
 
   const showStorageWarning = () => {
     storageUnavailable = true;
@@ -311,56 +201,43 @@ export function createAppController(
     countdownTimer = null;
   };
 
-  const clearPlayingTimers = (resetFrameAnchor = true) => {
-    if (checkpointTimer !== null) clearInterval(checkpointTimer);
-    checkpointTimer = null;
-    if (resetFrameAnchor) frameAnchorSeconds = null;
-  };
-
   const saveCheckpoint = () => {
-    if (!run) return;
-    if (!saveRun(run, showStorageWarning)) showStorageWarning();
-  };
-
-  const persistProgress = () => {
-    if (!saveProgress(progress, showStorageWarning)) showStorageWarning();
+    if (run && run.status !== 'complete' && !saveRunner(run, showStorageWarning)) showStorageWarning();
   };
 
   const stopGameplay = () => {
     clearCountdown();
-    clearPlayingTimers();
+    frameClock.reset();
+    checkpointAccumulator = 0;
     if (frameHandle !== null) cancelFrame(frameHandle);
     frameHandle = null;
     unbindActions?.();
     unbindActions = null;
-    gameView?.dispose();
-    gameView = null;
+    view?.dispose();
+    view = null;
     gameScreen = null;
-    questionElapsedMs = 0;
   };
 
-  const showFatal = (kind: 'content' | 'webgl' | 'unknown') => {
+  const showFatal = () => {
     stopGameplay();
     screen = 'fatal';
-    const fatal = createFatalScreen(kind);
+    const fatal = createWebGLFatalScreen();
     root.replaceChildren(fatal);
-    queueMicrotask(() => fatal.focus({ preventScroll: true }));
     appendStorageWarning();
+    queueMicrotask(() => fatal.focus({ preventScroll: true }));
   };
 
   const renderMenu = () => {
     stopGameplay();
     run = null;
-    choices = null;
     screen = 'menu';
+    completionRecorded = false;
     const menu = createMenuScreen({
-      selectedLevel: progress.selectedLevel,
-      reducedMotion: progress.reducedMotion,
-      contentReleaseState,
-      onStart: (level) => startSelectedLevel(level),
+      profile,
+      onStart: () => startNewRun(),
       onReducedMotion: (enabled) => {
-        progress = { ...progress, reducedMotion: enabled };
-        persistProgress();
+        profile = { ...profile, reducedMotion: enabled };
+        if (!saveProfile(profile, showStorageWarning)) showStorageWarning();
       },
     });
     root.replaceChildren(menu);
@@ -368,297 +245,264 @@ export function createAppController(
     queueMicrotask(() => menu.focus({ preventScroll: true }));
   };
 
-  const updateQuestion = (resetGate: boolean) => {
-    if (!run || !gameScreen || !gameView || !choices) return;
-    gameScreen.update(run, promptFor(run, entriesById), choices);
-    gameView.setLane(run.lane);
-    gameView.setGateTerms(choices.map((choice) => choice.term) as [string, string, string]);
-    if (resetGate) {
-      questionElapsedMs = 0;
-      gameView.setQuestionDuration(questionDurationMs() / 1_000);
-      gameView.resetGatePhase();
+  const finishRun = () => {
+    if (completionRecorded || !run || run.status !== 'complete') return;
+    completionRecorded = true;
+    profile = recordCompletedRun(profile, run);
+    if (!saveProfile(profile, showStorageWarning)) showStorageWarning();
+    clearRunner(showStorageWarning);
+    const completedRun = run;
+    stopGameplay();
+    screen = 'result';
+    const result = createResultScreen({
+      run: completedRun,
+      highScore: profile.highScore,
+      onRestart: () => startNewRun(),
+      onMenu: () => renderMenu(),
+    });
+    root.replaceChildren(result);
+    appendStorageWarning();
+    queueMicrotask(() => result.focus({ preventScroll: true }));
+  };
+
+  const applyAdvance = (delta: number) => {
+    if (!run || screen !== 'playing' || delta <= 0) return;
+    run = advanceRunner(run, delta);
+    view?.setSnapshot(run);
+    gameScreen?.update(run);
+    checkpointAccumulator += delta;
+    if (checkpointAccumulator >= 0.5) {
+      checkpointAccumulator %= 0.5;
+      saveCheckpoint();
     }
+    if (run.status === 'complete') finishRun();
   };
 
   const renderFrame: FrameRequestCallback = (timestamp) => {
-    if (destroyed || !gameView) return;
-    const elapsedSeconds = timestamp / 1_000;
-    gameView.render(elapsedSeconds);
-    perfMonitor?.record(timestamp, gameView.getDiagnostics?.() ?? { drawCalls: 0, geometries: 0, textures: 0 });
-    if (screen === 'playing') {
-      const delta = frameAnchorSeconds === null ? 0 : elapsedSeconds - frameAnchorSeconds;
-      frameAnchorSeconds = elapsedSeconds;
-      if (delta >= 0 && delta <= MAX_FRAME_DELTA_SECONDS) questionElapsedMs += delta * 1_000;
-      if (questionElapsedMs >= questionDurationMs() - 0.01) resolveCurrentQuestion();
-    } else {
-      frameAnchorSeconds = null;
-    }
-    if (!destroyed && gameView) frameHandle = requestFrame(renderFrame);
+    if (destroyed || !view) return;
+    const delta = frameClock.accept(timestamp);
+    applyAdvance(delta);
+    view?.render(timestamp / 1_000);
+    if (view && perfMonitor) perfMonitor.record(timestamp, view.getDiagnostics());
+    if (!destroyed && view) frameHandle = requestFrame(renderFrame);
+  };
+
+  const moveToLane = (lane: Lane) => {
+    if (!run || screen !== 'playing') return;
+    let next = run;
+    while (next.lane !== lane) next = moveRunnerLane(next, lane < next.lane ? -1 : 1);
+    if (next === run) return;
+    run = next;
+    view?.setSnapshot(run);
+    gameScreen?.update(run);
+    gameScreen?.announceLane(run.lane);
+    saveCheckpoint();
   };
 
   const move = (direction: -1 | 1) => {
     if (!run || screen !== 'playing') return;
-    const next = moveLane(run, direction);
+    const next = moveRunnerLane(run, direction);
     if (next === run) return;
     run = next;
-    gameView?.setLane(run.lane);
+    view?.setSnapshot(run);
+    gameScreen?.update(run);
     gameScreen?.announceLane(run.lane);
-  };
-
-  const acknowledgeRun = () => {
-    clearRun(showStorageWarning);
-  };
-
-  const showReview = () => {
-    if (!run) return;
-    stopGameplay();
-    screen = 'review';
-    const completedRun = run;
-    const review = createReviewScreen({
-      run: completedRun,
-      entriesById,
-      onRestart: () => {
-        acknowledgeRun();
-        startSelectedLevel(completedRun.level);
-      },
-      onMenu: () => {
-        acknowledgeRun();
-        renderMenu();
-      },
-    });
-    root.replaceChildren(review);
-    appendStorageWarning();
-    queueMicrotask(() => review.focus({ preventScroll: true }));
-  };
-
-  const finishRun = () => {
-    if (!run || run.status !== 'complete') return;
-    const completedAt = now();
-    for (const answer of run.answers) progress = updateMastery(progress, answer.questionId, answer.correct, completedAt);
-    progress = {
-      ...progress,
-      highScores: { ...progress.highScores, [run.level]: Math.max(progress.highScores[run.level], run.score) },
-    };
-    persistProgress();
-    showReview();
-  };
-
-  const answerSelected = (selectedId: string): boolean => {
-    if (!run || screen !== 'playing' || !choices) return false;
-    const selected = choices.find((choice) => choice.id === selectedId);
-    if (!selected) return false;
-    const correctId = run.questionIds[run.questionIndex];
-    run = answerCurrent(run, selected.id, correctId);
     saveCheckpoint();
-    clearPlayingTimers(false);
-    if (run.status === 'complete') {
-      finishRun();
-      return true;
-    }
-    choices = createGateChoices(run, entries, entriesById);
-    updateQuestion(true);
-    startPlayingTimers(false);
-    return true;
   };
 
-  const resolveCurrentQuestion = (): boolean => {
-    if (!run || !choices) return false;
-    return answerSelected(choices[run.lane].id);
+  const abandonRun = () => {
+    clearRunner(showStorageWarning);
+    renderMenu();
   };
 
-  const startPlayingTimers = (resetFrameAnchor = true) => {
-    clearPlayingTimers(resetFrameAnchor);
-    checkpointTimer = setInterval(saveCheckpoint, 500);
-  };
-
-  const holdForVisibility = () => {
-    if (!run || !gameScreen || !gameView) return;
+  const pauseRun = (message = 'Lượt chơi đang tạm dừng.') => {
+    if (!run || !gameScreen || (screen !== 'playing' && screen !== 'countdown' && screen !== 'paused')) return;
     clearCountdown();
-    clearPlayingTimers();
-    resumeOnVisible = true;
+    run = { ...run, status: 'paused', endReason: null };
     screen = 'paused';
-    run = { ...run, status: 'paused' };
-    gameView.setPaused(true);
-    gameScreen.overlay.replaceChildren(createPauseOverlay(
-      'Trang đang bị ẩn. Lượt chơi sẽ tiếp tục khi trang hiển thị lại.',
-      () => beginCountdown(),
-      () => {
-        clearRun(showStorageWarning);
-        renderMenu();
-      },
-    ));
-  };
-
-  const enterPlaying = () => {
-    if (!run || !gameView || !gameScreen || destroyed) return;
-    if (document.visibilityState === 'hidden') {
-      holdForVisibility();
-      return;
-    }
-    clearCountdown();
-    screen = 'playing';
-    run = { ...run, status: 'playing' };
-    gameScreen.overlay.replaceChildren();
-    gameView.setPaused(false);
+    frameClock.reset();
+    view?.setSnapshot(run);
+    view?.setPaused(true);
     saveCheckpoint();
-    startPlayingTimers();
-    gameScreen.viewport.focus({ preventScroll: true });
-  };
-
-  const beginCountdown = () => {
-    if (!run || !gameScreen || !gameView || destroyed) return;
-    if (document.visibilityState === 'hidden') {
-      holdForVisibility();
-      return;
-    }
-    clearCountdown();
-    clearPlayingTimers();
-    screen = 'countdown';
-    run = { ...run, status: 'paused' };
-    gameView.setPaused(true);
-    let remaining = COUNTDOWN_SECONDS;
-    const overlay = createCountdownOverlay(remaining);
-    gameScreen.overlay.replaceChildren(overlay);
-    countdownTimer = setInterval(() => {
-      remaining -= 1;
-      const value = overlay.querySelector<HTMLElement>('[data-countdown]');
-      if (remaining > 0) {
-        if (value) value.textContent = String(remaining);
+    gameScreen.update(run);
+    gameScreen.overlay.replaceChildren(createPauseOverlay(message, () => {
+      if (document.visibilityState === 'hidden') {
+        visibilitySuspended = true;
         return;
       }
-      enterPlaying();
+      startCountdown();
+    }, abandonRun));
+  };
+
+  const startCountdown = () => {
+    if (!run || !gameScreen || !view || destroyed) return;
+    clearCountdown();
+    run = { ...run, status: 'paused', endReason: null };
+    screen = 'countdown';
+    frameClock.reset();
+    view.setSnapshot(run);
+    view.setPaused(true);
+    gameScreen.update(run);
+    let value = 3;
+    gameScreen.overlay.replaceChildren(createCountdownOverlay(value));
+    saveCheckpoint();
+    countdownTimer = setInterval(() => {
+      if (!run || !gameScreen || !view || destroyed) {
+        clearCountdown();
+        return;
+      }
+      value -= 1;
+      if (value > 0) {
+        gameScreen.overlay.replaceChildren(createCountdownOverlay(value));
+        return;
+      }
+      clearCountdown();
+      run = { ...run, status: 'playing', endReason: null };
+      screen = 'playing';
+      frameClock.reset();
+      view.setSnapshot(run);
+      view.setPaused(false);
+      gameScreen.update(run);
+      gameScreen.overlay.replaceChildren();
+      saveCheckpoint();
+      gameScreen.viewport.focus({ preventScroll: true });
     }, 1_000);
   };
 
-  const pause = (message = 'Lượt chơi và thời gian đã được giữ nguyên.') => {
-    if (!run || (screen !== 'playing' && screen !== 'countdown')) return;
-    clearCountdown();
-    clearPlayingTimers();
-    screen = 'paused';
-    run = { ...run, status: 'paused' };
-    gameView?.setPaused(true);
-    saveCheckpoint();
-    gameScreen?.overlay.replaceChildren(createPauseOverlay(message, beginCountdown, () => {
-      clearRun(showStorageWarning);
-      renderMenu();
-    }));
-  };
-
-  const mountGameplay = (): boolean => {
-    if (!run || !choices) return false;
+  const prepareGameplay = () => {
+    if (!run) return false;
     stopGameplay();
-    gameScreen = createGameScreen(() => pause());
-    root.replaceChildren(gameScreen.element);
+    const nextScreen = createGameScreen(() => pauseRun());
+    gameScreen = nextScreen;
+    root.replaceChildren(nextScreen.element);
     appendStorageWarning();
     try {
-      effectiveReducedMotion = progress.reducedMotion || prefersReducedMotion();
-      gameView = createGameView(gameScreen.viewport, {
-        reducedMotion: effectiveReducedMotion,
+      view = createRunnerView(nextScreen.viewport, {
+        reducedMotion: run.reducedMotion,
         onContextLost: () => {
-          resumeAfterContextRestore = screen === 'playing' || screen === 'countdown';
-          pause('Mất ngữ cảnh WebGL. Trò chơi đang chờ khôi phục.');
+          if (screen !== 'playing' && screen !== 'countdown') return;
+          contextSuspended = true;
+          pauseRun('Kết nối đồ họa bị gián đoạn.');
         },
         onContextRestored: () => {
-          if (resumeAfterContextRestore && document.visibilityState !== 'hidden') beginCountdown();
-          resumeAfterContextRestore = false;
+          if (!contextSuspended || !run || !gameScreen || !view) return;
+          contextSuspended = false;
+          if (document.visibilityState === 'hidden') {
+            visibilitySuspended = true;
+            return;
+          }
+          startCountdown();
         },
       });
-      updateQuestion(true);
-      unbindActions = bindActions(gameScreen.viewport, {
-        left: () => move(-1),
-        right: () => move(1),
-        pause: () => pause(),
-      });
-      frameHandle = requestFrame(renderFrame);
-      return true;
     } catch {
-      showFatal('webgl');
+      showFatal();
       return false;
     }
+    view.setSnapshot(run);
+    view.setPaused(true);
+    nextScreen.update(run);
+    unbindActions = bindActions(nextScreen.viewport, {
+      left: () => move(-1),
+      right: () => move(1),
+      pause: () => pauseRun(),
+    });
+    screen = 'paused';
+    frameHandle = requestFrame(renderFrame);
+    return true;
   };
 
-  const startSelectedLevel = (level: HskLevel) => {
-    if (destroyed) return;
-    try {
-      const suppliedRun = dependencies.startRun?.(level);
-      progress = { ...progress, selectedLevel: level };
-      persistProgress();
-      run = suppliedRun ?? createSimulationRun(entries, progress.mastery, level, createSeed(), now());
-      choices = createGateChoices(run, entries, entriesById);
-      perfMonitor?.reset();
-      if (!mountGameplay()) return;
-      enterPlaying();
-    } catch {
-      showFatal('content');
+  function startNewRun() {
+    completionRecorded = false;
+    visibilitySuspended = false;
+    contextSuspended = false;
+    run = { ...createRunner(createSeed(), reducedMotionPreference(profile)), status: 'paused' };
+    if (!prepareGameplay()) return;
+    if (document.visibilityState === 'hidden') {
+      visibilitySuspended = true;
+      pauseRun();
+    } else {
+      startCountdown();
+    }
+  }
+
+  const restoreRun = (restored: RunnerState) => {
+    completionRecorded = false;
+    run = { ...restored, status: 'paused', endReason: null };
+    if (!prepareGameplay()) return;
+    saveCheckpoint();
+    if (document.visibilityState === 'hidden') {
+      visibilitySuspended = true;
+      pauseRun();
+    } else {
+      startCountdown();
     }
   };
 
   const onVisibilityChange = () => {
     if (document.visibilityState === 'hidden') {
-      const wasActive = screen === 'playing' || screen === 'countdown';
-      if (wasActive) {
-        resumeOnVisible = true;
-        pause('Trang đã bị ẩn. Lượt chơi được giữ nguyên.');
+      if (run && (screen === 'playing' || screen === 'countdown')) {
+        visibilitySuspended = true;
+        pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.');
       }
-      else saveCheckpoint();
       return;
     }
-    if (resumeOnVisible) {
-      resumeOnVisible = false;
-      beginCountdown();
+    if (visibilitySuspended && run && gameScreen && view) {
+      visibilitySuspended = false;
+      startCountdown();
     }
   };
   document.addEventListener('visibilitychange', onVisibilityChange);
 
-  try {
-    entries = loadEntries();
-    contentReleaseState = loadContentReleaseState();
-    entriesById = new Map(entries.map((entry) => [entry.id, entry]));
-    progress = loadProgress(showStorageWarning);
-    const restored = Object.hasOwn(dependencies, 'restoredRun')
-      ? dependencies.restoredRun ?? null
-      : loadRun(showStorageWarning);
-    if (restored && isCompatibleRun(restored, entries, entriesById)) {
-      run = restored.status === 'complete' ? restored : { ...restored, status: 'paused' };
-      if (run.status === 'complete') showReview();
-      else {
-        choices = createGateChoices(run, entries, entriesById);
-        perfMonitor?.reset();
-        if (mountGameplay()) beginCountdown();
-      }
-    } else {
-      if (restored) clearRun(showStorageWarning);
-      renderMenu();
-    }
-  } catch {
-    showFatal('content');
+  profile = loadProfile(showStorageWarning);
+  const restored = loadRunner(showStorageWarning);
+  if (restored?.status === 'complete') {
+    clearRunner(showStorageWarning);
+    renderMenu();
+  } else if (restored) {
+    restoreRun(restored);
+  } else {
+    renderMenu();
   }
 
-  const testHook: AppTestHook | undefined = enableTestHooks ? {
-    snapshot: () => structuredClone({
-      screen,
-      run,
-      choices,
-      performance: perfMonitor?.snapshot() ?? emptyPerformanceSnapshot(),
-      reducedMotion: effectiveReducedMotion,
-      questionDurationMs: questionDurationMs(),
-      framing: gameView?.getFramingDiagnostics?.() ?? null,
-    }),
-    answer: answerSelected,
-    resetPerformance: () => perfMonitor?.reset(),
+  const snapshot = () => ({ screen, run: cloneRun(run), profile: { ...profile } });
+  const test: NeonGliderE2E | undefined = enableTestApi ? {
+    snapshot,
+    setLane(lane) {
+      if (lane !== 0 && lane !== 1 && lane !== 2) throw new RangeError('lane must be 0, 1, or 2');
+      moveToLane(lane);
+    },
+    advance(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) throw new RangeError('seconds must be finite and non-negative');
+      let remaining = seconds;
+      while (remaining > 0 && run?.status === 'playing' && screen === 'playing') {
+        const delta = Math.min(0.25, remaining);
+        applyAdvance(delta);
+        remaining -= delta;
+      }
+    },
+    forceEnd(reason) {
+      if (reason !== 'collision' && reason !== 'depleted') throw new RangeError('unsupported end reason');
+      if (!run) run = createRunner(createSeed(), reducedMotionPreference(profile));
+      if (completionRecorded) return;
+      run = { ...run, status: 'complete', endReason: reason };
+      finishRun();
+    },
+    diagnostics() {
+      if (!perfMonitor || !view) return null;
+      return { ...perfMonitor.snapshot(), framing: view.getFramingDiagnostics() };
+    },
   } : undefined;
 
   return {
     root,
-    testHook,
-    getState: () => ({ screen, run, choices }),
+    getState: snapshot,
+    test,
     destroy() {
       if (destroyed) return;
       destroyed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       stopGameplay();
       perfMonitor?.dispose();
-      root.replaceChildren();
     },
   };
 }

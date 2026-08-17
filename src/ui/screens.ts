@@ -1,10 +1,5 @@
-import type { ContentReleaseState, HanziEntry, HskLevel } from '../content/types';
-import type { RunState } from '../simulation/types';
-
-export interface GateChoice {
-  id: string;
-  term: string;
-}
+import type { RunnerProfile } from '../storage/profile-storage';
+import type { RunnerState } from '../simulation/runner-types';
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -12,19 +7,31 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   return node;
 }
 
-function button(label: string, action: string): HTMLButtonElement {
-  const node = element('button', 'ui-button');
+function button(label: string, action: string, className = 'ui-button'): HTMLButtonElement {
+  const node = element('button', className);
   node.type = 'button';
   node.textContent = label;
   node.dataset.action = action;
   return node;
 }
 
+function metric(label: string, dataName: string, className = ''): { root: HTMLElement; value: HTMLElement } {
+  const root = element('div', `hud-metric ${className}`.trim());
+  const caption = element('span', 'hud-label');
+  caption.textContent = label;
+  const value = element('strong', 'hud-value');
+  value.dataset[dataName] = '';
+  root.append(caption, value);
+  return { root, value };
+}
+
+function formatInteger(value: number): string {
+  return Math.floor(value).toLocaleString('en-US');
+}
+
 export function createMenuScreen(options: {
-  selectedLevel: HskLevel;
-  reducedMotion: boolean;
-  contentReleaseState: ContentReleaseState;
-  onStart(level: HskLevel): void;
+  profile: RunnerProfile;
+  onStart(): void;
   onReducedMotion(enabled: boolean): void;
 }): HTMLElement {
   const screen = element('section', 'menu-screen');
@@ -32,40 +39,27 @@ export function createMenuScreen(options: {
   screen.tabIndex = -1;
   screen.setAttribute('aria-labelledby', 'game-title');
 
-  const eyebrow = element('p', 'eyebrow');
-  eyebrow.textContent = 'HSK 3.0 · 2026';
   const title = element('h1');
   title.id = 'game-title';
-  title.textContent = 'Hanzi Glider';
+  title.textContent = 'NEON GLIDER';
   const description = element('p', 'menu-copy');
-  description.textContent = 'Chọn làn bay qua chữ Hán đúng. Mỗi lượt gồm 20 câu.';
-  const draftNotice = options.contentReleaseState.releaseReady ? null : element('p', 'content-notice');
-  if (draftNotice) {
-    draftNotice.dataset.contentNotice = '';
-    draftNotice.textContent = 'Nghĩa tiếng Việt đang chờ duyệt nội dung.';
-  }
-
-  const levels = element('div', 'level-actions');
-  levels.setAttribute('aria-label', 'Chọn cấp độ HSK');
-  for (const level of [1, 2, 3] as const) {
-    const levelButton = button(`HSK ${level}`, `start-${level}`);
-    levelButton.dataset.level = String(level);
-    if (level === options.selectedLevel) levelButton.classList.add('is-selected');
-    levelButton.addEventListener('click', () => options.onStart(level));
-    levels.append(levelButton);
-  }
+  description.textContent = 'SỐNG SÓT. NÉ CHƯỚNG NGẠI. GIỮ NĂNG LƯỢNG.';
+  const record = element('p', 'menu-record');
+  record.textContent = `KỶ LỤC ${formatInteger(options.profile.highScore)}`;
+  const controls = element('p', 'menu-controls');
+  controls.textContent = 'A / D — ĐỔI LÀN   ESC / P — TẠM DỪNG';
+  const start = button('Bắt đầu', 'start', 'ui-button primary-button');
+  start.addEventListener('click', options.onStart);
 
   const motionLabel = element('label', 'motion-toggle');
   const motion = element('input');
   motion.type = 'checkbox';
-  motion.checked = options.reducedMotion;
+  motion.checked = options.profile.reducedMotion;
   motion.dataset.reducedMotion = '';
   motion.addEventListener('change', () => options.onReducedMotion(motion.checked));
   motionLabel.append(motion, document.createTextNode(' Giảm chuyển động'));
 
-  screen.append(eyebrow, title, description);
-  if (draftNotice) screen.append(draftNotice);
-  screen.append(levels, motionLabel);
+  screen.append(title, description, record, controls, start, motionLabel);
   return screen;
 }
 
@@ -73,74 +67,73 @@ export interface GameScreen {
   element: HTMLElement;
   viewport: HTMLElement;
   overlay: HTMLElement;
-  update(run: RunState, prompt: string, choices: readonly [GateChoice, GateChoice, GateChoice]): void;
+  update(run: RunnerState): void;
   announceLane(lane: 0 | 1 | 2): void;
 }
 
 export function createGameScreen(onPause: () => void): GameScreen {
   const screen = element('section', 'game-screen');
   screen.dataset.screen = 'game';
-  screen.tabIndex = -1;
-  screen.setAttribute('aria-label', 'Đường bay luyện chữ Hán');
+  screen.setAttribute('aria-label', 'Đường bay Neon Glider');
 
   const viewport = element('div', 'game-viewport');
   viewport.dataset.gameViewport = '';
   viewport.tabIndex = 0;
   viewport.setAttribute('aria-label', 'Vuốt, chạm mép hoặc dùng phím mũi tên để đổi làn');
 
-  const hud = element('div', 'game-hud');
-  const objective = element('section', 'objective-chip');
-  objective.setAttribute('aria-labelledby', 'question-label');
-  const objectiveLabel = element('span', 'hud-label');
-  objectiveLabel.id = 'question-label';
-  objectiveLabel.textContent = 'Tìm chữ';
-  const prompt = element('strong', 'question-prompt');
-  prompt.dataset.prompt = '';
-  objective.append(objectiveLabel, prompt);
+  const score = metric('SCORE', 'score');
+  const multiplier = metric('MULTIPLIER', 'multiplier', 'multiplier-metric');
+  const leftHud = element('section', 'hud-cluster hud-left');
+  leftHud.setAttribute('aria-label', 'Điểm');
+  leftHud.append(score.root, multiplier.root);
 
-  const status = element('section', 'status-strip');
-  status.setAttribute('aria-label', 'Trạng thái lượt chơi');
-  const score = element('span');
-  score.dataset.score = '';
-  const combo = element('span');
-  combo.dataset.combo = '';
-  const energy = element('span');
-  energy.dataset.energy = '';
-  const speed = element('span');
-  speed.dataset.speed = '';
-  speed.textContent = 'Tốc độ 1×';
-  const progress = element('span');
-  progress.dataset.progress = '';
-  const pause = button('Tạm dừng', 'pause');
-  pause.classList.add('pause-button');
+  const distance = metric('DISTANCE', 'distance');
+  const gate = metric('', 'gate', 'gate-metric');
+  const rightHud = element('section', 'hud-cluster hud-right');
+  rightHud.setAttribute('aria-label', 'Khoảng cách và cổng');
+  rightHud.append(distance.root, gate.root);
+
+  const energyHud = element('section', 'energy-hud');
+  energyHud.setAttribute('aria-label', 'Năng lượng');
+  const energyLabel = element('span', 'hud-label');
+  energyLabel.textContent = 'ENERGY';
+  const energyBar = element('div', 'energy-bar');
+  energyBar.dataset.energyBar = '';
+  energyBar.setAttribute('role', 'progressbar');
+  energyBar.setAttribute('aria-label', 'Năng lượng');
+  energyBar.setAttribute('aria-valuemin', '0');
+  energyBar.setAttribute('aria-valuemax', '100');
+  const energyFill = element('span', 'energy-fill');
+  energyBar.append(energyFill);
+  energyHud.append(energyLabel, energyBar);
+
+  const pause = element('button', 'pause-button');
+  pause.type = 'button';
+  pause.dataset.action = 'pause';
+  pause.setAttribute('aria-label', 'Tạm dừng');
+  const pauseIcon = element('i', 'ph ph-pause');
+  pauseIcon.setAttribute('aria-hidden', 'true');
+  pause.append(pauseIcon);
   pause.addEventListener('click', onPause);
-  status.append(score, combo, energy, speed, progress, pause);
-  hud.append(objective, status);
 
-  const accessibleGates = element('ol', 'sr-only');
-  accessibleGates.setAttribute('aria-label', 'Ba lựa chọn theo làn trái, giữa, phải');
   const laneStatus = element('p', 'sr-only');
-  laneStatus.setAttribute('aria-live', 'polite');
   laneStatus.dataset.laneStatus = '';
+  laneStatus.setAttribute('aria-live', 'polite');
   const overlay = element('div', 'overlay-slot');
-  screen.append(viewport, hud, accessibleGates, laneStatus, overlay);
+  screen.append(viewport, leftHud, rightHud, energyHud, pause, laneStatus, overlay);
 
   return {
     element: screen,
     viewport,
     overlay,
-    update(run, nextPrompt, choices) {
-      prompt.textContent = nextPrompt;
-      score.textContent = `Điểm ${run.score}`;
-      combo.textContent = `Combo ×${run.combo}`;
-      energy.textContent = `Năng lượng ${run.energy}`;
-      progress.textContent = `${Math.min(run.questionIndex + 1, 20)} / 20`;
-      accessibleGates.replaceChildren(...choices.map((choice, lane) => {
-        const item = element('li');
-        item.dataset.gateTerm = '';
-        item.textContent = `${['Trái', 'Giữa', 'Phải'][lane]}: ${choice.term}`;
-        return item;
-      }));
+    update(run) {
+      score.value.textContent = formatInteger(run.score);
+      multiplier.value.textContent = `×${run.multiplier.toFixed(1)}`;
+      distance.value.textContent = `${formatInteger(run.distance)}m`;
+      gate.value.textContent = `GATE ${run.gates + 1}`;
+      const boundedEnergy = Math.max(0, Math.min(100, run.energy));
+      energyBar.setAttribute('aria-valuenow', String(Math.round(boundedEnergy)));
+      energyFill.style.width = `${boundedEnergy}%`;
     },
     announceLane(lane) {
       laneStatus.textContent = `Đã chuyển sang làn ${['trái', 'giữa', 'phải'][lane]}`;
@@ -149,12 +142,12 @@ export function createGameScreen(onPause: () => void): GameScreen {
 }
 
 export function createCountdownOverlay(value: number): HTMLElement {
-  const overlay = element('section', 'modal-overlay countdown-overlay');
+  const overlay = element('section', 'countdown-overlay');
   overlay.dataset.screen = 'countdown';
   overlay.setAttribute('role', 'status');
   overlay.setAttribute('aria-live', 'assertive');
-  const label = element('p');
-  label.textContent = 'Tiếp tục sau';
+  const label = element('span', 'sr-only');
+  label.textContent = 'Bắt đầu sau';
   const count = element('strong', 'countdown-value');
   count.dataset.countdown = '';
   count.textContent = String(value);
@@ -163,14 +156,14 @@ export function createCountdownOverlay(value: number): HTMLElement {
 }
 
 export function createPauseOverlay(message: string, onResume: () => void, onMenu: () => void): HTMLElement {
-  const overlay = element('section', 'modal-overlay');
+  const overlay = element('section', 'modal-overlay pause-overlay');
   overlay.dataset.screen = 'paused';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-labelledby', 'pause-title');
   const title = element('h2');
   title.id = 'pause-title';
-  title.textContent = 'Đã tạm dừng';
+  title.textContent = 'TẠM DỪNG';
   const copy = element('p');
   copy.textContent = message;
   const actions = element('div', 'modal-actions');
@@ -180,70 +173,44 @@ export function createPauseOverlay(message: string, onResume: () => void, onMenu
   menu.addEventListener('click', onMenu);
   actions.append(resume, menu);
   overlay.append(title, copy, actions);
-  queueMicrotask(() => resume.focus());
+  queueMicrotask(() => resume.focus({ preventScroll: true }));
   return overlay;
 }
 
-export function createReviewScreen(options: {
-  run: RunState;
-  entriesById: ReadonlyMap<string, HanziEntry>;
+export function createResultScreen(options: {
+  run: RunnerState;
+  highScore: number;
   onRestart(): void;
   onMenu(): void;
 }): HTMLElement {
-  const screen = element('section', 'review-screen');
-  screen.dataset.screen = 'review';
+  const screen = element('section', 'result-screen');
+  screen.dataset.screen = 'result';
   screen.tabIndex = -1;
-  screen.setAttribute('aria-labelledby', 'review-title');
-  const eyebrow = element('p', 'eyebrow');
-  eyebrow.textContent = `HSK ${options.run.level} · ${options.run.score} điểm`;
+  screen.setAttribute('aria-labelledby', 'result-title');
   const title = element('h1');
-  title.id = 'review-title';
-  title.textContent = 'Ôn lại lượt bay';
-  const mistakes = options.run.answers.filter((answer) => !answer.correct);
-  const summary = element('p', 'review-summary');
-  summary.textContent = mistakes.length === 0
-    ? 'Bạn đã trả lời đúng cả 20 câu.'
-    : `${mistakes.length} từ cần xem lại.`;
-  const list = element('ol', 'review-list');
-  for (const answer of mistakes) {
-    const correct = options.entriesById.get(answer.questionId);
-    const selected = options.entriesById.get(answer.selectedId);
-    const item = element('li', 'review-item');
-    const term = element('strong', 'review-term');
-    term.textContent = correct?.term ?? answer.questionId;
-    const detail = element('p');
-    detail.textContent = `${correct?.pinyin ?? '—'} · ${correct?.meaningsVi.join('; ') ?? '—'}`;
-    const chosen = element('p', 'review-selected');
-    chosen.textContent = `Bạn chọn: ${selected?.term ?? answer.selectedId}`;
-    item.append(term, detail, chosen);
-    list.append(item);
+  title.id = 'result-title';
+  title.textContent = options.run.endReason === 'depleted' ? 'CẠN NĂNG LƯỢNG' : 'VA CHẠM';
+  const stats = element('dl', 'result-stats');
+  for (const [label, value] of [
+    ['SCORE', formatInteger(options.run.score)],
+    ['DISTANCE', `${formatInteger(options.run.distance)}m`],
+    ['GATES', formatInteger(options.run.gates)],
+    ['CRYSTALS', formatInteger(options.run.crystals)],
+    ['HIGH SCORE', formatInteger(options.highScore)],
+  ]) {
+    const term = element('dt');
+    term.textContent = label;
+    const detail = element('dd');
+    detail.textContent = value;
+    stats.append(term, detail);
   }
   const actions = element('div', 'modal-actions');
-  const restart = button('Bay lại', 'restart');
+  const restart = button('Chơi lại', 'restart', 'ui-button primary-button');
   restart.addEventListener('click', options.onRestart);
   const menu = button('Về menu', 'menu');
   menu.addEventListener('click', options.onMenu);
   actions.append(restart, menu);
-  screen.append(eyebrow, title, summary, list, actions);
-  return screen;
-}
-
-export function createFatalScreen(kind: 'content' | 'webgl' | 'unknown'): HTMLElement {
-  const screen = element('section', 'fatal-screen');
-  screen.dataset.screen = 'fatal';
-  screen.tabIndex = -1;
-  screen.setAttribute('role', 'alert');
-  const title = element('h1');
-  title.textContent = kind === 'content' ? 'Không thể tải nội dung'
-    : kind === 'webgl' ? 'Trình duyệt không hỗ trợ WebGL'
-      : 'Không thể khởi động trò chơi';
-  const copy = element('p');
-  copy.textContent = kind === 'content'
-    ? 'Dữ liệu HSK không hợp lệ hoặc không khả dụng.'
-    : kind === 'webgl'
-      ? 'Hãy bật tăng tốc phần cứng hoặc dùng trình duyệt mới hơn.'
-      : 'Hãy tải lại trang để thử lại.';
-  screen.append(title, copy);
+  screen.append(title, stats, actions);
   return screen;
 }
 
@@ -251,6 +218,19 @@ export function createStorageWarning(): HTMLElement {
   const warning = element('p', 'storage-warning');
   warning.dataset.storageWarning = '';
   warning.setAttribute('role', 'status');
-  warning.textContent = 'Tiến trình không được lưu trên trình duyệt này.';
+  warning.textContent = 'Không thể lưu tiến trình trên trình duyệt này.';
   return warning;
+}
+
+export function createWebGLFatalScreen(): HTMLElement {
+  const screen = element('section', 'fatal-screen');
+  screen.dataset.screen = 'fatal';
+  screen.tabIndex = -1;
+  screen.setAttribute('role', 'alert');
+  const title = element('h1');
+  title.textContent = 'KHÔNG THỂ KHỞI TẠO WEBGL';
+  const copy = element('p');
+  copy.textContent = 'Hãy bật tăng tốc phần cứng hoặc dùng trình duyệt mới hơn.';
+  screen.append(title, copy);
+  return screen;
 }

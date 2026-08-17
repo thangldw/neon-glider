@@ -4,7 +4,7 @@ export interface ActionHandlers {
   pause(): void;
 }
 
-type ActionTarget = Window | HTMLElement;
+type ActionTarget = HTMLElement;
 type ActiveGesture = { id: number; startX: number; startY: number; dispatched: boolean };
 
 const SWIPE_DISTANCE = 32;
@@ -15,16 +15,12 @@ function dispatchDirection(distance: number, handlers: ActionHandlers): void {
   else handlers.right();
 }
 
-function isElement(target: ActionTarget): target is HTMLElement {
-  return target instanceof HTMLElement;
-}
-
 export function bindActions(target: ActionTarget, handlers: ActionHandlers): () => void {
   let activeGesture: ActiveGesture | null = null;
   let activePointerId: number | null = null;
   let disposed = false;
-  const priorTouchAction = isElement(target) ? target.style.touchAction : undefined;
-  if (isElement(target)) target.style.touchAction = 'none';
+  const priorTouchAction = target.style.touchAction;
+  target.style.touchAction = 'none';
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) return;
@@ -44,7 +40,7 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
     if (eventPointerId !== undefined && activePointerId !== eventPointerId) return;
     const pointerId = activePointerId;
     activePointerId = null;
-    if (pointerId !== null && isElement(target) && target.hasPointerCapture?.(pointerId)) {
+    if (pointerId !== null && target.hasPointerCapture?.(pointerId)) {
       target.releasePointerCapture(pointerId);
     }
     releaseGesture();
@@ -70,7 +66,7 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
     const distance = clientX - active.startX;
     if (!active.dispatched && Math.abs(distance) > SWIPE_DISTANCE) {
       dispatchDirection(distance, handlers);
-    } else if (!active.dispatched && Math.abs(clientY - active.startY) <= SWIPE_DISTANCE && isElement(target)) {
+    } else if (!active.dispatched && Math.abs(clientY - active.startY) <= SWIPE_DISTANCE) {
       const bounds = target.getBoundingClientRect();
       const relativeX = bounds.width > 0 ? (clientX - bounds.left) / bounds.width : 0.5;
       if (relativeX <= EDGE_FRACTION) handlers.left();
@@ -83,7 +79,7 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
     if (event.button !== 0 || activePointerId !== null) return;
     beginGesture(event.pointerId, event.clientX, event.clientY);
     activePointerId = event.pointerId;
-    if (isElement(target) && target.setPointerCapture) target.setPointerCapture(event.pointerId);
+    if (target.setPointerCapture) target.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event: PointerEvent) => {
@@ -123,19 +119,17 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
   const supportsPointerEvents = typeof window.PointerEvent === 'function';
 
   target.addEventListener('keydown', onKeyDown as EventListener);
-  if (isElement(target)) {
-    if (supportsPointerEvents) {
-      target.addEventListener('pointerdown', onPointerDown);
-      target.addEventListener('pointermove', onPointerMove, { passive: false });
-      target.addEventListener('pointerup', onPointerUp);
-      target.addEventListener('pointercancel', onPointerCancel);
-      target.addEventListener('lostpointercapture', onLostPointerCapture);
-    } else {
-      target.addEventListener('touchstart', onTouchStart, { passive: true });
-      target.addEventListener('touchmove', onTouchMove, { passive: false });
-      target.addEventListener('touchend', onTouchEnd);
-      target.addEventListener('touchcancel', onTouchCancel);
-    }
+  if (supportsPointerEvents) {
+    target.addEventListener('pointerdown', onPointerDown);
+    target.addEventListener('pointermove', onPointerMove, { passive: false });
+    target.addEventListener('pointerup', onPointerUp);
+    target.addEventListener('pointercancel', onPointerCancel);
+    target.addEventListener('lostpointercapture', onLostPointerCapture);
+  } else {
+    target.addEventListener('touchstart', onTouchStart, { passive: true });
+    target.addEventListener('touchmove', onTouchMove, { passive: false });
+    target.addEventListener('touchend', onTouchEnd);
+    target.addEventListener('touchcancel', onTouchCancel);
   }
 
   return () => {
@@ -143,20 +137,18 @@ export function bindActions(target: ActionTarget, handlers: ActionHandlers): () 
     disposed = true;
     releasePointerCapture();
     target.removeEventListener('keydown', onKeyDown as EventListener);
-    if (isElement(target)) {
-      if (supportsPointerEvents) {
-        target.removeEventListener('pointerdown', onPointerDown);
-        target.removeEventListener('pointermove', onPointerMove);
-        target.removeEventListener('pointerup', onPointerUp);
-        target.removeEventListener('pointercancel', onPointerCancel);
-        target.removeEventListener('lostpointercapture', onLostPointerCapture);
-      } else {
-        target.removeEventListener('touchstart', onTouchStart);
-        target.removeEventListener('touchmove', onTouchMove);
-        target.removeEventListener('touchend', onTouchEnd);
-        target.removeEventListener('touchcancel', onTouchCancel);
-      }
-      target.style.touchAction = priorTouchAction ?? '';
+    if (supportsPointerEvents) {
+      target.removeEventListener('pointerdown', onPointerDown);
+      target.removeEventListener('pointermove', onPointerMove);
+      target.removeEventListener('pointerup', onPointerUp);
+      target.removeEventListener('pointercancel', onPointerCancel);
+      target.removeEventListener('lostpointercapture', onLostPointerCapture);
+    } else {
+      target.removeEventListener('touchstart', onTouchStart);
+      target.removeEventListener('touchmove', onTouchMove);
+      target.removeEventListener('touchend', onTouchEnd);
+      target.removeEventListener('touchcancel', onTouchCancel);
     }
+    target.style.touchAction = priorTouchAction;
   };
 }
