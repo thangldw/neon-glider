@@ -15,7 +15,10 @@ declare global {
 const root = document.querySelector<HTMLElement>('#app');
 if (!root) throw new Error('Missing #app mount point');
 
-clearLegacyLearningKeys(window.sessionStorage, window.localStorage);
+clearLegacyLearningKeys(
+  () => window.sessionStorage,
+  () => window.localStorage,
+);
 
 let app: ReturnType<typeof createAppController> | null = null;
 try {
