@@ -12,7 +12,7 @@ export interface TrackEntity {
 }
 
 export interface RunnerState {
-  schemaVersion: 3;
+  schemaVersion: 2;
   gameVersion: 'neon-glider-2026-08-17';
   seed: number;
   rngState: number;

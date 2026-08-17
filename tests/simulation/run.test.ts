@@ -5,7 +5,7 @@ describe('Neon Glider simulation', () => {
   it('creates a deterministic serializable run', () => {
     expect(createRunner(91)).toEqual(createRunner(91));
     expect(createRunner(91)).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 2,
       gameVersion: 'neon-glider-2026-08-17',
       lane: 1,
       distance: 0,

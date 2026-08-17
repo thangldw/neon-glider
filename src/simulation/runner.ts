@@ -43,7 +43,7 @@ export function createRunner(seed: number, reducedMotion = false): RunnerState {
   assertFinite(seed, 'seed');
   if (typeof reducedMotion !== 'boolean') throw new RangeError('reducedMotion must be a boolean');
   const initial: RunnerState = {
-    schemaVersion: 3,
+    schemaVersion: 2,
     gameVersion: GAME_VERSION,
     seed: seed >>> 0,
     rngState: seed >>> 0,
