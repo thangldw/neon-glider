@@ -3,6 +3,36 @@ import { expect, it, vi } from 'vitest';
 import { createNeonMaterials } from '../../src/render/neon/materials';
 import { createNeonTunnel } from '../../src/render/neon/tunnel';
 
+const mathConstructions = vi.hoisted(() => ({ matrix4: 0, vector3: 0, quaternion: 0 }));
+
+vi.mock('three', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('three')>();
+  class InstrumentedMatrix4 extends actual.Matrix4 {
+    constructor() {
+      super();
+      mathConstructions.matrix4 += 1;
+    }
+  }
+  class InstrumentedVector3 extends actual.Vector3 {
+    constructor(x?: number, y?: number, z?: number) {
+      super(x, y, z);
+      mathConstructions.vector3 += 1;
+    }
+  }
+  class InstrumentedQuaternion extends actual.Quaternion {
+    constructor(x?: number, y?: number, z?: number, w?: number) {
+      super(x, y, z, w);
+      mathConstructions.quaternion += 1;
+    }
+  }
+  return {
+    ...actual,
+    Matrix4: InstrumentedMatrix4,
+    Vector3: InstrumentedVector3,
+    Quaternion: InstrumentedQuaternion,
+  };
+});
+
 function withCanvasContext<T>(run: () => T): T {
   const context = {
     clearRect: vi.fn(),
@@ -66,6 +96,29 @@ it('updates the existing gate label texture instead of allocating scene objects'
 
   expect((label.material as THREE.MeshBasicMaterial).map).toBe(texture);
   expect(tunnel.root.getObjectByName('active-gate')!.position.z).toBe(-250);
+  tunnel.dispose();
+  materials.dispose();
+}));
+
+it('reuses preallocated Three.js math objects across repeated segment updates', () => withCanvasContext(() => {
+  const materials = createNeonMaterials();
+  const tunnel = createNeonTunnel({ quality: 'desktop', materials });
+  const ribs = tunnel.root.getObjectByName('cyan-ribs') as THREE.InstancedMesh;
+  const before = new THREE.Matrix4();
+  const after = new THREE.Matrix4();
+  ribs.getMatrixAt(0, before);
+  mathConstructions.matrix4 = 0;
+  mathConstructions.vector3 = 0;
+  mathConstructions.quaternion = 0;
+
+  for (let frame = 1; frame <= 120; frame += 1) tunnel.update(frame / 2, 1);
+  ribs.getMatrixAt(0, after);
+
+  expect(after.elements[14]).not.toBe(before.elements[14]);
+  for (let element = 0; element < 16; element += 1) {
+    if (element !== 14) expect(after.elements[element]).toBe(before.elements[element]);
+  }
+  expect(mathConstructions).toEqual({ matrix4: 0, vector3: 0, quaternion: 0 });
   tunnel.dispose();
   materials.dispose();
 }));

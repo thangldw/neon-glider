@@ -46,21 +46,6 @@ function octagonEdges(): Edge[] {
   });
 }
 
-function setBoxMatrix(
-  target: THREE.InstancedMesh,
-  index: number,
-  edge: Edge,
-  z: number,
-  thickness: number,
-  depth: number,
-): void {
-  const matrix = new THREE.Matrix4();
-  const position = new THREE.Vector3(edge.x, edge.y, z);
-  const quaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), edge.angle);
-  matrix.compose(position, quaternion, new THREE.Vector3(edge.length, thickness, depth));
-  target.setMatrixAt(index, matrix);
-}
-
 function createGateTexture(gate: number): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
@@ -95,6 +80,26 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const edges = octagonEdges();
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   const labelGeometry = new THREE.PlaneGeometry(3.4, 0.72);
+  const scratchMatrix = new THREE.Matrix4();
+  const scratchPosition = new THREE.Vector3();
+  const scratchQuaternion = new THREE.Quaternion();
+  const scratchScale = new THREE.Vector3();
+  const zAxis = new THREE.Vector3(0, 0, 1);
+
+  function setBoxMatrix(
+    target: THREE.InstancedMesh,
+    index: number,
+    edge: Edge,
+    z: number,
+    thickness: number,
+    depth: number,
+  ): void {
+    scratchPosition.set(edge.x, edge.y, z);
+    scratchQuaternion.setFromAxisAngle(zAxis, edge.angle);
+    scratchScale.set(edge.length, thickness, depth);
+    scratchMatrix.compose(scratchPosition, scratchQuaternion, scratchScale);
+    target.setMatrixAt(index, scratchMatrix);
+  }
 
   const ribs = new THREE.Group();
   ribs.name = 'tunnel-ribs';
@@ -142,46 +147,76 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   root.add(ribs, wallGroup, floorGroup, activeGate);
 
   const loopLength = segmentCount * SEGMENT_SPACING;
+  const cyanSegments = new Uint8Array(cyanRibs.count);
+  const magentaSegments = new Uint8Array(magentaRibs.count);
+  const wallSegments = new Uint8Array(wallPanels.count);
+  const floorSegments = new Uint8Array(floorPanels.count);
   let shownGate = 1;
   let disposed = false;
 
-  function updateSegments(distance: number): void {
-    const phase = ((distance % loopLength) + loopLength) % loopLength;
+  function segmentZ(segment: number, phase: number): number {
+    let ahead = ((segment * SEGMENT_SPACING - phase) % loopLength + loopLength) % loopLength;
+    if (ahead === 0) ahead = loopLength;
+    return -ahead;
+  }
+
+  function initializeSegments(): void {
     let cyanIndex = 0;
     let magentaIndex = 0;
     let wallIndex = 0;
     let floorIndex = 0;
-    const floorQuaternion = new THREE.Quaternion();
-    const floorScale = new THREE.Vector3(2.82, 0.12, SEGMENT_SPACING * 0.9);
-    const matrix = new THREE.Matrix4();
 
     for (let segment = 0; segment < segmentCount; segment += 1) {
-      let ahead = ((segment * SEGMENT_SPACING - phase) % loopLength + loopLength) % loopLength;
-      if (ahead === 0) ahead = loopLength;
-      const ribZ = -ahead;
+      const ribZ = segmentZ(segment, 0);
       for (let edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 1) {
         const mesh = (segment + edgeIndex) % 2 === 0 ? cyanRibs : magentaRibs;
         const index = mesh === cyanRibs ? cyanIndex++ : magentaIndex++;
         setBoxMatrix(mesh, index, edges[edgeIndex], ribZ, 0.1, 0.14);
+        (mesh === cyanRibs ? cyanSegments : magentaSegments)[index] = segment;
         if (edgeIndex !== 5) {
           setBoxMatrix(wallPanels, wallIndex, edges[edgeIndex], ribZ - SEGMENT_SPACING / 2, 0.16, SEGMENT_SPACING * 0.88);
+          wallSegments[wallIndex] = segment;
           wallIndex += 1;
         }
       }
       for (const laneX of [-3, 0, 3]) {
-        matrix.compose(
-          new THREE.Vector3(laneX, FLOOR_Y - 0.06, ribZ - SEGMENT_SPACING / 2),
-          floorQuaternion,
-          floorScale,
-        );
-        floorPanels.setMatrixAt(floorIndex, matrix);
+        scratchPosition.set(laneX, FLOOR_Y - 0.06, ribZ - SEGMENT_SPACING / 2);
+        scratchQuaternion.identity();
+        scratchScale.set(2.82, 0.12, SEGMENT_SPACING * 0.9);
+        scratchMatrix.compose(scratchPosition, scratchQuaternion, scratchScale);
+        floorPanels.setMatrixAt(floorIndex, scratchMatrix);
+        floorSegments[floorIndex] = segment;
         floorIndex += 1;
       }
     }
-    for (const mesh of [cyanRibs, magentaRibs, wallPanels, floorPanels]) mesh.instanceMatrix.needsUpdate = true;
+    cyanRibs.instanceMatrix.needsUpdate = true;
+    magentaRibs.instanceMatrix.needsUpdate = true;
+    wallPanels.instanceMatrix.needsUpdate = true;
+    floorPanels.instanceMatrix.needsUpdate = true;
   }
 
-  updateSegments(0);
+  function updateInstanceZ(
+    mesh: THREE.InstancedMesh,
+    segments: Uint8Array,
+    phase: number,
+    zOffset: number,
+  ): void {
+    const matrices = mesh.instanceMatrix.array;
+    for (let instance = 0; instance < segments.length; instance += 1) {
+      matrices[instance * 16 + 14] = segmentZ(segments[instance], phase) + zOffset;
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  function updateSegments(distance: number): void {
+    const phase = ((distance % loopLength) + loopLength) % loopLength;
+    updateInstanceZ(cyanRibs, cyanSegments, phase, 0);
+    updateInstanceZ(magentaRibs, magentaSegments, phase, 0);
+    updateInstanceZ(wallPanels, wallSegments, phase, -SEGMENT_SPACING / 2);
+    updateInstanceZ(floorPanels, floorSegments, phase, -SEGMENT_SPACING / 2);
+  }
+
+  initializeSegments();
   activeGate.position.z = -GATE_DISTANCE;
 
   return {
