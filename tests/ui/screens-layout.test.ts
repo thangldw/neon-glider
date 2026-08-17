@@ -22,6 +22,28 @@ it('renders the approved sparse arcade HUD', () => {
   expect(screen.element.querySelector('[data-hsk], [data-content-notice]')).toBeNull();
 });
 
+it('separates numeric HUD values from their units without changing update hooks', () => {
+  const screen = createGameScreen(vi.fn());
+  screen.update({ ...createRunner(1), score: 127_450, distance: 2_734, gates: 11, energy: 73 });
+
+  expect(screen.element.querySelector('[data-score]')?.classList).toContain('hud-number');
+  expect(screen.element.querySelector('[data-distance]')?.textContent).toBe('2,734');
+  expect(screen.element.querySelector('[data-distance-unit]')?.textContent).toBe('m');
+  expect(screen.element.querySelector('[data-gate]')?.textContent).toBe('GATE 12');
+  expect(screen.element.querySelector('[data-energy-bar]')?.classList).toContain('energy-track');
+});
+
+it('keeps the menu concise and exposes one primary action', () => {
+  const menu = createMenuScreen({
+    profile: { schemaVersion: 1, highScore: 0, longestDistance: 0, runCount: 0, reducedMotion: false },
+    onStart: vi.fn(),
+    onReducedMotion: vi.fn(),
+  });
+
+  expect(menu.querySelectorAll('.primary-button')).toHaveLength(1);
+  expect(menu.querySelector('.menu-kicker')?.textContent).toBe('ENDLESS NEON RUNNER');
+});
+
 it('uses the maintained pause icon inside an accessible playfield-external control', () => {
   const screen = createGameScreen(vi.fn());
   const pause = screen.element.querySelector<HTMLButtonElement>('[data-action="pause"]');

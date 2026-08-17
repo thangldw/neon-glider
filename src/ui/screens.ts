@@ -19,7 +19,7 @@ function metric(label: string, dataName: string, className = ''): { root: HTMLEl
   const root = element('div', `hud-metric ${className}`.trim());
   const caption = element('span', 'hud-label');
   caption.textContent = label;
-  const value = element('strong', 'hud-value');
+  const value = element('strong', 'hud-value hud-readout');
   value.dataset[dataName] = '';
   root.append(caption, value);
   return { root, value };
@@ -39,6 +39,8 @@ export function createMenuScreen(options: {
   screen.tabIndex = -1;
   screen.setAttribute('aria-labelledby', 'game-title');
 
+  const kicker = element('p', 'menu-kicker');
+  kicker.textContent = 'ENDLESS NEON RUNNER';
   const title = element('h1');
   title.id = 'game-title';
   title.textContent = 'NEON GLIDER';
@@ -59,7 +61,7 @@ export function createMenuScreen(options: {
   motion.addEventListener('change', () => options.onReducedMotion(motion.checked));
   motionLabel.append(motion, document.createTextNode(' Giảm chuyển động'));
 
-  screen.append(title, description, record, controls, start, motionLabel);
+  screen.append(kicker, title, description, record, controls, start, motionLabel);
   return screen;
 }
 
@@ -83,12 +85,18 @@ export function createGameScreen(onPause: () => void): GameScreen {
   viewport.setAttribute('aria-label', 'Vuốt, chạm mép hoặc dùng phím mũi tên để đổi làn');
 
   const score = metric('SCORE', 'score');
+  score.value.classList.add('hud-number');
   const multiplier = metric('MULTIPLIER', 'multiplier', 'multiplier-metric');
   const leftHud = element('section', 'hud-cluster hud-left');
   leftHud.setAttribute('aria-label', 'Điểm');
   leftHud.append(score.root, multiplier.root);
 
   const distance = metric('DISTANCE', 'distance');
+  distance.value.classList.add('hud-number');
+  const distanceUnit = element('span', 'hud-unit');
+  distanceUnit.dataset.distanceUnit = '';
+  distanceUnit.textContent = 'm';
+  distance.root.append(distanceUnit);
   const gate = metric('', 'gate', 'gate-metric');
   const rightHud = element('section', 'hud-cluster hud-right');
   rightHud.setAttribute('aria-label', 'Khoảng cách và cổng');
@@ -98,7 +106,7 @@ export function createGameScreen(onPause: () => void): GameScreen {
   energyHud.setAttribute('aria-label', 'Năng lượng');
   const energyLabel = element('span', 'hud-label');
   energyLabel.textContent = 'ENERGY';
-  const energyBar = element('div', 'energy-bar');
+  const energyBar = element('div', 'energy-bar energy-track');
   energyBar.dataset.energyBar = '';
   energyBar.setAttribute('role', 'progressbar');
   energyBar.setAttribute('aria-label', 'Năng lượng');
@@ -139,7 +147,7 @@ export function createGameScreen(onPause: () => void): GameScreen {
     update(run) {
       score.value.textContent = formatInteger(run.score);
       multiplier.value.textContent = `×${run.multiplier.toFixed(1)}`;
-      distance.value.textContent = `${formatInteger(run.distance)}m`;
+      distance.value.textContent = formatInteger(run.distance);
       gate.value.textContent = `GATE ${run.gates + 1}`;
       const boundedEnergy = Math.max(0, Math.min(100, run.energy));
       energyBar.setAttribute('aria-valuenow', String(Math.round(boundedEnergy)));

@@ -10,6 +10,10 @@
   --muted: #9ca9c2;
   --line: rgb(168 221 255 / 55%);
   --warning: #ffd166;
+  --hud-glass: rgb(3 7 22 / 52%);
+  --hud-edge: rgb(124 224 255 / 34%);
+  --cyan-soft: #8eeeff;
+  --magenta-hot: #ff4fd8;
   background: var(--void);
   color: var(--white);
   font-synthesis: none;
@@ -92,6 +96,14 @@ input:focus-visible {
   letter-spacing: 0.035em;
   text-transform: uppercase;
   text-shadow: 0 0 2rem rgb(25 217 255 / 34%), 0 0 3.5rem rgb(255 59 212 / 22%);
+}
+
+.menu-kicker {
+  margin: 0 0 0.65rem;
+  color: var(--cyan-soft);
+  font-size: clamp(0.65rem, 1.5vw, 0.85rem);
+  font-weight: 800;
+  letter-spacing: 0.22em;
 }
 
 .menu-copy {
@@ -206,6 +218,10 @@ input:focus-visible {
   top: max(1.25rem, env(safe-area-inset-top));
   display: grid;
   gap: 1.4rem;
+  padding: 0.75rem 0.85rem;
+  border-inline-start: 1px solid var(--hud-edge);
+  background: var(--hud-glass);
+  backdrop-filter: blur(6px);
   pointer-events: none;
 }
 
@@ -222,6 +238,19 @@ input:focus-visible {
 .hud-metric {
   display: grid;
   gap: 0.2rem;
+}
+
+.distance-metric {
+  grid-template-columns: max-content min-content;
+}
+
+.distance-metric .hud-label {
+  grid-column: 1 / -1;
+}
+
+.distance-metric .hud-unit {
+  grid-column: 2;
+  grid-row: 2;
 }
 
 .hud-label {
@@ -241,6 +270,18 @@ input:focus-visible {
   letter-spacing: 0.01em;
   line-height: 1;
   text-shadow: 0 0 1.2rem rgb(25 217 255 / 18%);
+}
+
+.hud-number {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.025em;
+}
+
+.hud-unit {
+  align-self: end;
+  margin-inline-start: 0.2em;
+  color: var(--muted);
+  font-size: 0.42em;
 }
 
 .multiplier-metric .hud-value {
@@ -272,6 +313,10 @@ input:focus-visible {
   padding: 0.18rem;
   transform: skewX(-14deg);
   background: rgb(3 5 14 / 82%);
+}
+
+.energy-track {
+  clip-path: polygon(1.5% 0, 100% 0, 98.5% 100%, 0 100%);
 }
 
 .energy-fill {
@@ -506,7 +551,7 @@ input:focus-visible {
   *::after {
     scroll-behavior: auto !important;
     animation: none !important;
-    transition: none !important;
+    transition-duration: 0s !important;
   }
 
   .menu-screen h1,
@@ -528,7 +573,7 @@ input:focus-visible {
 [data-reduced-motion="true"] *::after {
   scroll-behavior: auto !important;
   animation: none !important;
-  transition: none !important;
+  transition-duration: 0s !important;
 }
 
 [data-reduced-motion="true"] .menu-screen h1,
