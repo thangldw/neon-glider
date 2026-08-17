@@ -44,7 +44,7 @@ it('uses bloom when composer creation succeeds and direct rendering when it fail
   expect(composedFixture.composer.render).toHaveBeenCalledOnce();
   expect(renderer.render).not.toHaveBeenCalled();
   expect(composedFixture.passes.map((pass) => (pass as { constructor: { name: string } }).constructor.name))
-    .toEqual(['RenderPass', 'ShaderPass', 'OutputPass']);
+    .toEqual(['RenderPass', 'UnrealBloomPass', 'OutputPass']);
   composed.dispose();
 
   const fallback = createPostFx(renderer, scene, camera, {
@@ -81,7 +81,7 @@ it('falls back permanently when a composed frame fails', () => {
   fx.dispose();
 });
 
-it('keeps mobile glow at CSS-faithful resolution and disposes once', () => {
+it('uses the approved lower-resolution mobile Unreal bloom and disposes once', () => {
   const renderer = rendererFixture();
   const fixture = composerFixture();
   const fx = createPostFx(renderer, new THREE.Scene(), new THREE.PerspectiveCamera(), {
@@ -92,19 +92,21 @@ it('keeps mobile glow at CSS-faithful resolution and disposes once', () => {
     createComposer: () => fixture.composer,
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(412, 915);
-  const glow = fixture.passes[1] as { uniforms: Record<string, { value: number | THREE.Vector2 }> };
-  expect(glow.uniforms.strength.value).toBe(0.28);
-  expect(glow.uniforms.threshold.value).toBe(0.7);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(309, 686);
+  const glow = fixture.passes[1] as import('three/examples/jsm/postprocessing/UnrealBloomPass.js').UnrealBloomPass;
+  expect(glow.strength).toBe(0.34);
+  expect(glow.radius).toBe(0.3);
+  expect(glow.threshold).toBe(0.54);
+  expect(glow.renderTargetBright).toMatchObject({ width: 101, height: 223 });
   fx.setSize(400, 800);
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(400, 800);
-  expect(glow.uniforms.resolution.value).toMatchObject({ x: 400, y: 800 });
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(300, 600);
+  expect(glow.renderTargetBright).toMatchObject({ width: 98, height: 195 });
   fx.dispose();
   fx.dispose();
   expect(fixture.composer.dispose).toHaveBeenCalledOnce();
 });
 
-it('keeps desktop glow at CSS-faithful resolution with a restrained highlight response', () => {
+it('uses the approved desktop Unreal bloom with scaled bloom buffers', () => {
   const fixture = composerFixture();
   let target: THREE.WebGLRenderTarget | undefined;
   const fx = createPostFx(rendererFixture(), new THREE.Scene(), new THREE.PerspectiveCamera(), {
@@ -118,12 +120,13 @@ it('keeps desktop glow at CSS-faithful resolution with a restrained highlight re
     },
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(1_536, 1_024);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(538, 358);
   expect(target?.texture.type).toBe(THREE.UnsignedByteType);
-  const glow = fixture.passes[1] as { uniforms: Record<string, { value: number | THREE.Vector2 }> };
-  expect(glow.uniforms.strength.value).toBe(0.34);
-  expect(glow.uniforms.threshold.value).toBe(0.68);
-  expect(glow.uniforms.resolution.value).toMatchObject({ x: 1_536, y: 1_024 });
+  const glow = fixture.passes[1] as import('three/examples/jsm/postprocessing/UnrealBloomPass.js').UnrealBloomPass;
+  expect(glow.strength).toBe(0.38);
+  expect(glow.radius).toBe(0.3);
+  expect(glow.threshold).toBe(0.54);
+  expect(glow.renderTargetBright).toMatchObject({ width: 215, height: 143 });
   fx.dispose();
 });
 

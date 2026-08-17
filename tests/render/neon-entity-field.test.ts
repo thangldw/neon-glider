@@ -59,6 +59,53 @@ it('maps lanes and forward distance without mutating simulation entities', () =>
   materials.dispose();
 });
 
+it('writes visible instance matrices, rotations, counts, and clears stale draws', () => {
+  const materials = createNeonMaterials();
+  const field = createEntityField(materials);
+  field.sync([
+    { id: 'cube-left', kind: 'cube', lane: 0, distance: 50, segment: 0 },
+    { id: 'prism-center', kind: 'prism', lane: 1, distance: 60, segment: 1 },
+    { id: 'wall-right', kind: 'wall', lane: 2, distance: 70, segment: 2 },
+    { id: 'crystal-right', kind: 'crystal', lane: 2, distance: 80, segment: 3 },
+  ], 20);
+
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const expected = [
+    ['cube-entity-batch', -3, -30, 0],
+    ['prism-entity-batch', 0, -40, Math.PI / 6],
+    ['wall-entity-batch', 3, -50, 0],
+  ] as const;
+  for (const [name, x, z, rotationY] of expected) {
+    const batch = field.root.getObjectByName(name) as THREE.InstancedMesh;
+    expect(batch.count).toBe(1);
+    batch.getMatrixAt(0, matrix);
+    matrix.decompose(position, rotation, scale);
+    expect(position.x).toBeCloseTo(x);
+    expect(position.z).toBeCloseTo(z);
+    expect(new THREE.Euler().setFromQuaternion(rotation).y).toBeCloseTo(rotationY);
+  }
+  const crystal = field.root.getObjectByName('crystal-entity-batch') as THREE.InstancedMesh;
+  expect(crystal.count).toBe(1);
+  crystal.getMatrixAt(0, matrix);
+  matrix.decompose(position, rotation, scale);
+  expect(position.x).toBeCloseTo(3);
+  expect(position.z).toBeCloseTo(-60);
+  expect(new THREE.Euler().setFromQuaternion(rotation).y).not.toBeCloseTo(0);
+
+  field.sync([], 20);
+  for (const name of [
+    'cube-entity-batch', 'prism-entity-batch', 'wall-entity-batch', 'crystal-entity-batch',
+    'cube-entity-outline', 'prism-entity-outline', 'wall-entity-outline',
+  ]) {
+    expect(field.root.getObjectByName(name)).toMatchObject({ count: 0 });
+  }
+  field.dispose();
+  materials.dispose();
+});
+
 it('returns stale meshes to a kind-specific pool', () => {
   const materials = createNeonMaterials();
   const field = createEntityField(materials);

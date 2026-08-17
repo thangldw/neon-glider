@@ -78,6 +78,97 @@ function isObstacle(entity: TrackEntity): boolean {
   return entity.kind !== 'crystal';
 }
 
+interface FrameResolution {
+  distance: number;
+  energy: number;
+  gatesCrossed: number;
+  collectedCrystals: number;
+  endReason: 'collision' | 'depleted' | null;
+}
+
+function energyDrainRate(gates: number): number {
+  return 2.5 + Math.min(gates, 10) * 0.2;
+}
+
+function resolveFrame(run: RunnerState, intendedDistance: number): FrameResolution {
+  const eventDistances = new Set<number>([intendedDistance]);
+  for (
+    let gateDistance = (Math.floor(run.distance / GATE_DISTANCE) + 1) * GATE_DISTANCE;
+    gateDistance <= intendedDistance;
+    gateDistance += GATE_DISTANCE
+  ) {
+    eventDistances.add(gateDistance);
+  }
+  for (const entity of run.entities) {
+    if (entity.lane === run.lane && entity.distance > run.distance && entity.distance <= intendedDistance) {
+      eventDistances.add(entity.distance);
+    }
+  }
+
+  let distance = run.distance;
+  let energy = run.energy;
+  let gates = run.gates;
+  let collectedCrystals = 0;
+  for (const eventDistance of [...eventDistances].sort((left, right) => left - right)) {
+    const drainRate = energyDrainRate(gates);
+    const travelSeconds = (eventDistance - distance) / run.speed;
+    const drained = drainRate * travelSeconds;
+    if (drained > energy) {
+      const depletionSeconds = energy / drainRate;
+      return {
+        distance: distance + depletionSeconds * run.speed,
+        energy: 0,
+        gatesCrossed: gates - run.gates,
+        collectedCrystals,
+        endReason: 'depleted',
+      };
+    }
+    energy -= drained;
+    distance = eventDistance;
+
+    if (eventDistance > 0 && eventDistance % GATE_DISTANCE === 0) {
+      gates += 1;
+      energy = clamp(energy + GATE_ENERGY, 0, START_ENERGY);
+    }
+    const collides = run.entities.some((entity) => (
+      entity.distance === eventDistance && entity.lane === run.lane && isObstacle(entity)
+    ));
+    if (collides) {
+      return {
+        distance,
+        energy,
+        gatesCrossed: gates - run.gates,
+        collectedCrystals,
+        endReason: 'collision',
+      };
+    }
+    const crystalsAtEvent = run.entities.filter((entity) => (
+      entity.distance === eventDistance && entity.lane === run.lane && entity.kind === 'crystal'
+    )).length;
+    if (crystalsAtEvent > 0) {
+      collectedCrystals += crystalsAtEvent;
+      energy = clamp(energy + crystalsAtEvent * CRYSTAL_ENERGY, 0, START_ENERGY);
+    }
+    if (energy === 0) {
+      return {
+        distance,
+        energy: 0,
+        gatesCrossed: gates - run.gates,
+        collectedCrystals,
+        endReason: 'depleted',
+      };
+    }
+  }
+
+  return {
+    distance: intendedDistance,
+    energy,
+    gatesCrossed: gates - run.gates,
+    collectedCrystals,
+    endReason: null,
+  };
+}
+
 export function advanceRunner(run: RunnerState, deltaSeconds: number): RunnerState {
   if (run.status !== 'playing') return run;
   assertFinite(deltaSeconds, 'deltaSeconds');
@@ -85,37 +176,24 @@ export function advanceRunner(run: RunnerState, deltaSeconds: number): RunnerSta
 
   const oldDistance = run.distance;
   const intendedDistance = oldDistance + run.speed * deltaSeconds;
-  const impactDistance = run.entities
-    .filter((entity) => isObstacle(entity) && entity.lane === run.lane && entity.distance > oldDistance && entity.distance <= intendedDistance)
-    .reduce<number | null>((nearest, entity) => nearest === null || entity.distance < nearest ? entity.distance : nearest, null);
-  const collision = impactDistance !== null;
-  const distance = impactDistance ?? intendedDistance;
-  const gatesCrossed = Math.max(0, Math.floor(distance / GATE_DISTANCE) - Math.floor(oldDistance / GATE_DISTANCE));
+  const resolution = resolveFrame(run, intendedDistance);
+  const { distance, gatesCrossed, collectedCrystals } = resolution;
   const gates = run.gates + gatesCrossed;
   const speed = clamp(run.speed + gatesCrossed * GATE_SPEED, START_SPEED, MAX_SPEED);
   const multiplier = clamp(run.multiplier + gatesCrossed * GATE_MULTIPLIER, 1, MAX_MULTIPLIER);
-  const crossed = run.entities
-    .filter((entity) => entity.distance > oldDistance && entity.distance <= distance)
-    .sort((left, right) => left.distance - right.distance || Number(isObstacle(right)) - Number(isObstacle(left)) || left.id.localeCompare(right.id));
-  const collectedCrystals = crossed.filter((entity) => entity.kind === 'crystal' && entity.lane === run.lane).length;
   const entities = run.entities.filter((entity) => entity.distance > distance);
-  const energy = clamp(
-    run.energy - (2.5 + Math.min(run.gates, 10) * 0.2) * ((distance - oldDistance) / run.speed) + gatesCrossed * GATE_ENERGY + collectedCrystals * CRYSTAL_ENERGY,
-    0,
-    START_ENERGY,
-  );
   const next: RunnerState = {
     ...run,
     distance,
     speed,
-    energy,
+    energy: resolution.energy,
     score: run.score + (distance - oldDistance) * SCORE_PER_METER * multiplier + collectedCrystals * 50 * multiplier,
     multiplier,
     gates,
     crystals: run.crystals + collectedCrystals,
     entities,
-    status: collision || energy === 0 ? 'complete' : 'playing',
-    endReason: collision ? 'collision' : energy === 0 ? 'depleted' : null,
+    status: resolution.endReason ? 'complete' : 'playing',
+    endReason: resolution.endReason,
   };
   return next.status === 'complete' ? next : { ...next, ...fillLookahead(next) };
 }

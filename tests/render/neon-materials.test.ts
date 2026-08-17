@@ -2,17 +2,22 @@ import * as THREE from 'three';
 import { expect, it, vi } from 'vitest';
 import { createNeonMaterials } from '../../src/render/neon/materials';
 
-it('creates a solid low-cost cyan-magenta depth palette', () => {
+it('creates the approved emissive PBR cyan-magenta metallic palette', () => {
   const materials = createNeonMaterials();
 
-  expect(materials.cyan).toBeInstanceOf(THREE.MeshBasicMaterial);
-  expect(materials.magenta).toBeInstanceOf(THREE.MeshBasicMaterial);
-  expect(materials.metal).toBeInstanceOf(THREE.MeshPhongMaterial);
-  expect(materials.obstacle).toBeInstanceOf(THREE.MeshPhongMaterial);
-  expect(materials.floor).toBeInstanceOf(THREE.MeshPhongMaterial);
-  expect(materials.crystal).toBeInstanceOf(THREE.MeshPhongMaterial);
-  expect(materials.cyan.color.getHex()).toBe(0x3cecff);
-  expect(materials.magenta.color.getHex()).toBe(0xff31cf);
+  expect(materials.cyan).toBeInstanceOf(THREE.MeshStandardMaterial);
+  expect(materials.magenta).toBeInstanceOf(THREE.MeshStandardMaterial);
+  expect(materials.metal).toBeInstanceOf(THREE.MeshStandardMaterial);
+  expect(materials.obstacle).toBeInstanceOf(THREE.MeshStandardMaterial);
+  expect(materials.floor).toBeInstanceOf(THREE.MeshStandardMaterial);
+  expect(materials.crystal).toBeInstanceOf(THREE.MeshPhysicalMaterial);
+  expect(materials.cyan.emissive.getHex()).toBe(0x00cfff);
+  expect(materials.magenta.emissive.getHex()).toBe(0xff20c8);
+  expect(materials.cyan.emissiveIntensity).toBeGreaterThan(1);
+  expect(materials.magenta.emissiveIntensity).toBeGreaterThan(1);
+  expect(materials.metal.metalness).toBeGreaterThanOrEqual(0.6);
+  expect(materials.floor.metalness).toBeGreaterThanOrEqual(0.7);
+  expect(materials.floor.roughness).toBeLessThanOrEqual(0.3);
   expect(materials.metal.wireframe).toBe(false);
   expect(materials.floor.wireframe).toBe(false);
   expect(materials.obstacle.color.getHex()).not.toBe(0x000000);
@@ -23,10 +28,10 @@ it('creates a solid low-cost cyan-magenta depth palette', () => {
   const floorTone = { h: 0, s: 0, l: 0 };
   materials.metal.color.getHSL(metalTone);
   materials.floor.color.getHSL(floorTone);
-  expect(metalTone.l).toBeGreaterThan(0.1);
-  expect(metalTone.l).toBeLessThan(0.18);
-  expect(floorTone.l).toBeGreaterThan(0.1);
-  expect(floorTone.l).toBeLessThan(0.2);
+  expect(metalTone.l).toBeGreaterThan(0.02);
+  expect(metalTone.l).toBeLessThan(0.3);
+  expect(floorTone.l).toBeGreaterThan(0.02);
+  expect(floorTone.l).toBeLessThan(0.3);
 
   materials.dispose();
 });

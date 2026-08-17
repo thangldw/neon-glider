@@ -43,6 +43,29 @@ it.each([
   expect(isRunnerState({ ...createRunner(1), ...patch })).toBe(false);
 });
 
+it.each([
+  ['speed/gates', { speed: 52 }],
+  ['multiplier/gates', { multiplier: 8 }],
+  ['playing energy', { energy: 0 }],
+  ['paused energy', { status: 'paused', energy: 0 }],
+  ['depleted energy', { status: 'complete', endReason: 'depleted', energy: 100 }],
+] as const)('clears a stored state with an incompatible %s relationship', (_relationship, patch) => {
+  const storage = new MapStorage([
+    ['neon-glider.run.v2', JSON.stringify({ ...createRunner(1), ...patch })],
+  ]);
+
+  expect(loadRunner(storage)).toBeNull();
+  expect(storage.getItem('neon-glider.run.v2')).toBeNull();
+});
+
+it('accepts canonical speed, multiplier, and energy relationships across lifecycle states', () => {
+  const active = createRunner(1);
+  expect(isRunnerState(active)).toBe(true);
+  expect(isRunnerState({ ...active, status: 'paused' })).toBe(true);
+  expect(isRunnerState({ ...active, status: 'complete', endReason: 'collision' })).toBe(true);
+  expect(isRunnerState({ ...active, status: 'complete', endReason: 'depleted', energy: 0 })).toBe(true);
+});
+
 it('rejects states whose random continuation or entities are inconsistent', () => {
   const run = createRunner(1);
   const entity = run.entities[0];

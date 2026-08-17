@@ -63,12 +63,12 @@ function drawGateNumber(texture: THREE.CanvasTexture, gate: number): void {
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = '#071129';
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = '#d8fbff';
+  context.fillStyle = '#8eeeff';
   context.font = '700 68px "Arial Narrow", "Helvetica Neue", sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.shadowColor = '#00cfff';
-  context.shadowBlur = 18;
+  context.shadowBlur = 3;
   context.fillText(`GATE ${gate}`, canvas.width / 2, canvas.height / 2 + 3);
   texture.needsUpdate = true;
 }
@@ -85,6 +85,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const scratchPosition = new THREE.Vector3();
   const scratchQuaternion = new THREE.Quaternion();
   const scratchScale = new THREE.Vector3();
+  const scratchColor = new THREE.Color();
   const zAxis = new THREE.Vector3(0, 0, 1);
 
   function setBoxMatrix(
@@ -124,6 +125,21 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   floorPanels.name = 'floor-panel-instances';
   floorGroup.add(floorPanels);
 
+  const panelDetailMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.18,
+    depthWrite: false,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+  });
+  const panelDetails = new THREE.InstancedMesh(unitBox, panelDetailMaterial, (segmentCount / 4) * 7);
+  panelDetails.name = 'panel-detail-instances';
+  panelDetails.frustumCulled = false;
+  panelDetails.visible = quality === 'desktop';
+
   for (const mesh of [cyanRibs, magentaRibs, wallPanels, floorPanels]) mesh.frustumCulled = false;
 
   const activeGate = new THREE.Group();
@@ -156,7 +172,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   gateLabel.name = 'gate-number';
   gateLabel.position.set(0, FLOOR_Y + 7.2, 0.16);
   activeGate.add(gateFrame, gateAccent, gateLabel);
-  root.add(ribs, wallGroup, floorGroup, activeGate);
+  root.add(ribs, wallGroup, floorGroup, panelDetails, activeGate);
 
   const loopLength = segmentCount * SEGMENT_SPACING;
   const cyanSegments = new Uint8Array(cyanRibs.count);
@@ -165,6 +181,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const magentaOffsets = new Float32Array(magentaRibs.count);
   const wallSegments = new Uint8Array(wallPanels.count);
   const floorSegments = new Uint8Array(floorPanels.count);
+  const detailSegments = new Uint8Array(panelDetails.count);
+  const detailOffsets = new Float32Array(panelDetails.count);
   let shownGate = 1;
   let disposed = false;
 
@@ -179,6 +197,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     let magentaIndex = 0;
     let wallIndex = 0;
     let floorIndex = 0;
+    let detailIndex = 0;
 
     for (let segment = 0; segment < segmentCount; segment += 1) {
       const ribZ = segmentZ(segment, 0);
@@ -189,6 +208,16 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
         (mesh === cyanRibs ? cyanSegments : magentaSegments)[index] = segment;
         if (edgeIndex !== 5) {
           setBoxMatrix(wallPanels, wallIndex, edges[edgeIndex], ribZ - SEGMENT_SPACING / 2, 0.16, SEGMENT_SPACING * 0.88);
+          wallPanels.setColorAt(wallIndex, scratchColor.setHex(
+            (segment + edgeIndex) % 3 === 0 ? 0x9b73d9 : (edgeIndex % 2 === 0 ? 0x73a7db : 0x62528f),
+          ));
+          if (segment % 4 === 0) {
+            panelDetails.setMatrixAt(detailIndex, scratchMatrix);
+            panelDetails.setColorAt(detailIndex, scratchColor.setHex(edgeIndex % 2 === 0 ? 0x35dff4 : 0xe444ca));
+            detailSegments[detailIndex] = segment;
+            detailOffsets[detailIndex] = -SEGMENT_SPACING / 2;
+            detailIndex += 1;
+          }
           wallSegments[wallIndex] = segment;
           wallIndex += 1;
         }
@@ -199,6 +228,9 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
         scratchScale.set(2.82, 0.12, SEGMENT_SPACING * 0.9);
         scratchMatrix.compose(scratchPosition, scratchQuaternion, scratchScale);
         floorPanels.setMatrixAt(floorIndex, scratchMatrix);
+        floorPanels.setColorAt(floorIndex, scratchColor.setHex(
+          laneX === 0 ? 0x719bd4 : (laneX < 0 ? 0x517fc2 : 0x94599f),
+        ));
         floorSegments[floorIndex] = segment;
         floorIndex += 1;
       }
@@ -225,7 +257,11 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     cyanRibs.instanceMatrix.needsUpdate = true;
     magentaRibs.instanceMatrix.needsUpdate = true;
     wallPanels.instanceMatrix.needsUpdate = true;
+    if (wallPanels.instanceColor) wallPanels.instanceColor.needsUpdate = true;
     floorPanels.instanceMatrix.needsUpdate = true;
+    if (floorPanels.instanceColor) floorPanels.instanceColor.needsUpdate = true;
+    panelDetails.instanceMatrix.needsUpdate = true;
+    if (panelDetails.instanceColor) panelDetails.instanceColor.needsUpdate = true;
   }
 
   function updateInstanceZ(
@@ -248,6 +284,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     updateInstanceZ(magentaRibs, magentaSegments, phase, magentaOffsets);
     updateInstanceZ(wallPanels, wallSegments, phase, -SEGMENT_SPACING / 2);
     updateInstanceZ(floorPanels, floorSegments, phase, -SEGMENT_SPACING / 2);
+    updateInstanceZ(panelDetails, detailSegments, phase, detailOffsets);
   }
 
   initializeSegments();
@@ -261,7 +298,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       const safeDistance = Number.isFinite(distance) ? distance : 0;
       const safeGate = Number.isSafeInteger(nextGate) && nextGate > 0 ? nextGate : 1;
       updateSegments(safeDistance);
-      activeGate.position.z = -(safeGate * GATE_DISTANCE - safeDistance);
+      activeGate.position.z = -(safeGate * GATE_DISTANCE - safeDistance) - 1;
       if (safeGate !== shownGate) {
         shownGate = safeGate;
         drawGateNumber(gateTexture, safeGate);
@@ -275,6 +312,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       labelGeometry.dispose();
       gateTexture.dispose();
       gateLabelMaterial.dispose();
+      panelDetailMaterial.dispose();
     },
   };
 }

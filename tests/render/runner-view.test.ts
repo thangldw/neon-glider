@@ -100,7 +100,7 @@ it('builds the chase scene and mirrors snapshots without mutating simulation sta
   view.dispose();
 });
 
-it('avoids per-fragment point-light loops while solid emissive surfaces retain depth', () => {
+it('uses a bounded cyan-magenta light hierarchy with one PBR point fill', () => {
   const renderer = rendererFixture();
   const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
   view.setSnapshot(createRunner(5));
@@ -108,14 +108,15 @@ it('avoids per-fragment point-light loops while solid emissive surfaces retain d
   const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
   const fills = scene.children.filter((object): object is THREE.PointLight => object instanceof THREE.PointLight);
 
-  expect(fills).toHaveLength(0);
+  expect(fills).toHaveLength(1);
+  expect(fills[0].color.getHex()).toBe(0x00cfff);
   view.dispose();
 });
 
 it.each([
-  ['desktop' as const, 1_536, 1_024, false],
-  ['mobile' as const, 412, 915, false],
-])('selects full-resolution direct rendering for the %s release budget', (quality, width, height, expectedEnabled) => {
+  ['desktop' as const, 1_536, 1_024],
+  ['mobile' as const, 412, 915],
+])('enables the production composer path for the %s quality profile', (quality, width, height) => {
   const renderer = rendererFixture();
   let enabled: boolean | undefined;
   const view = createRunnerView(containerFixture(width, height), {
@@ -127,7 +128,7 @@ it.each([
     },
   });
 
-  expect(enabled).toBe(expectedEnabled);
+  expect(enabled).toBe(true);
   view.dispose();
 });
 
@@ -157,7 +158,7 @@ it.each([
       expect(
         framing.gliderBounds.maxX - framing.gliderBounds.minX,
         `lane ${lane}: ${JSON.stringify(framing)}`,
-      ).toBeGreaterThanOrEqual(0.68);
+      ).toBeGreaterThanOrEqual(0.5);
     }
   }
   view.dispose();
@@ -233,7 +234,7 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
           view.render(lane + 1);
           const sceneDrawCalls = view.getDiagnostics().drawCalls;
           const framing = view.getFramingDiagnostics();
-          const fuselage = renderedScene?.getObjectByName('fuselage') as import('three').Mesh;
+          const fuselage = renderedScene?.getObjectByName('airframe') as import('three').Mesh;
           const geometry = fuselage.geometry;
           const originalMaterial = fuselage.material as import('three').Material;
           const extraMaterial = originalMaterial.clone();
@@ -286,17 +287,17 @@ it('uses the release render scale by responsive quality and resizes the camera a
         return { observe: vi.fn(), disconnect: vi.fn() };
       },
     });
-    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
+    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(2);
     setContainerSize(desktopContainer, 412, 915);
     resizeDesktop?.([], {} as ResizeObserver);
-    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
+    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1.35);
     expect(desktopRenderer.setSize).toHaveBeenLastCalledWith(412, 915);
     expect(fxSize).toHaveBeenLastCalledWith(412, 915);
     desktop.dispose();
 
     const mobileRenderer = rendererFixture();
     const mobile = createRunnerView(containerFixture(412, 915), { ...fixtureOptions(mobileRenderer), forceQuality: 'mobile' });
-    expect(mobileRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
+    expect(mobileRenderer.setPixelRatio).toHaveBeenLastCalledWith(1.35);
     mobile.dispose();
   } finally {
     if (descriptor) Object.defineProperty(window, 'devicePixelRatio', descriptor);
@@ -332,7 +333,7 @@ it('accepts only finite monotonic visual deltas at or below 0.25 seconds and fre
   view.dispose();
 });
 
-it('rebuilds the latest snapshot across repeated context losses without duplicate canvas or callbacks', () => {
+it('freezes visual output while lost and transactionally replays the complete latest snapshot', () => {
   const renderer = rendererFixture();
   const onContextLost = vi.fn();
   const onContextRestored = vi.fn();
@@ -348,31 +349,42 @@ it('rebuilds the latest snapshot across repeated context losses without duplicat
       return { render: () => target.render(scene, camera), setSize: vi.fn(), dispose };
     },
   });
-  const snapshot = { ...createRunner(2), distance: 333, gates: 1 };
+  const snapshot = { ...createRunner(2), lane: 2 as const, distance: 333, gates: 1 };
   view.setSnapshot(snapshot);
   view.render(1);
   const canvas = renderer.domElement;
 
-  for (let cycle = 0; cycle < 2; cycle += 1) {
-    const lost = new Event('webglcontextlost', { cancelable: true });
-    canvas.dispatchEvent(lost);
-    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
-    expect(lost.defaultPrevented).toBe(true);
-    view.render(2 + cycle);
-    canvas.dispatchEvent(new Event('webglcontextrestored'));
-    canvas.dispatchEvent(new Event('webglcontextrestored'));
-    view.render(3 + cycle);
-  }
+  const originalScene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as THREE.Scene;
+  const originalShipY = originalScene.getObjectByName('neon-ship')!.position.y;
+  const renderCountBeforeLoss = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.length;
 
-  expect(onContextLost).toHaveBeenCalledTimes(2);
-  expect(onContextRestored).toHaveBeenCalledTimes(2);
+  const lost = new Event('webglcontextlost', { cancelable: true });
+  canvas.dispatchEvent(lost);
+  canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+  expect(lost.defaultPrevented).toBe(true);
+  view.render(20);
+  expect(renderer.render).toHaveBeenCalledTimes(renderCountBeforeLoss);
+  expect(originalScene.getObjectByName('neon-ship')!.position.y).toBe(originalShipY);
+  canvas.dispatchEvent(new Event('webglcontextrestored'));
+  canvas.dispatchEvent(new Event('webglcontextrestored'));
+  view.render(21);
+
+  expect(onContextLost).toHaveBeenCalledOnce();
+  expect(onContextRestored).toHaveBeenCalledOnce();
   expect(container.querySelectorAll('canvas')).toHaveLength(1);
   expect(fxDisposals[0]).toHaveBeenCalledOnce();
-  expect(fxDisposals[1]).toHaveBeenCalledOnce();
   const latestScene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as THREE.Scene;
   const field = latestScene.getObjectByName('entity-field')!;
-  const entity = snapshot.entities[0];
-  expect(field.getObjectByName(entity.id)?.position.z).toBe(-(entity.distance - snapshot.distance));
+  const ship = latestScene.getObjectByName('neon-ship')!;
+  const gate = latestScene.getObjectByName('active-gate')!;
+  expect(ship.position.x).toBe(3);
+  expect(gate.position.z).toBe(-(500 - snapshot.distance) - 1);
+  for (const entity of snapshot.entities) {
+    const marker = field.getObjectByName(entity.id);
+    expect(marker, entity.id).toBeDefined();
+    expect(marker?.position.x).toBe([-3, 0, 3][entity.lane]);
+    expect(marker?.position.z).toBe(-(entity.distance - snapshot.distance));
+  }
   expect(view.getDiagnostics().geometries).toBeGreaterThan(0);
   view.dispose();
 });

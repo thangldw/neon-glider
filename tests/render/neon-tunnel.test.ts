@@ -65,6 +65,9 @@ it('creates a bounded recycled tunnel with named gate and floor groups', () => w
   expect(tunnel.root.getObjectByName('tunnel-ribs')).toBeTruthy();
   expect(tunnel.root.getObjectByName('wall-panels')).toBeTruthy();
   expect(tunnel.root.getObjectByName('floor-panels')).toBeTruthy();
+  const details = tunnel.root.getObjectByName('panel-detail-instances') as THREE.InstancedMesh;
+  expect(details).toMatchObject({ count: 42 });
+  expect(details.material).toMatchObject({ wireframe: true, transparent: true });
   expect((tunnel.root.getObjectByName('cyan-ribs') as THREE.InstancedMesh).userData.railInstanceCount).toBe(96);
   expect((tunnel.root.getObjectByName('magenta-ribs') as THREE.InstancedMesh).userData.railInstanceCount).toBe(96);
   expect(tunnel.root.getObjectByName('active-gate')).toBeTruthy();
@@ -91,7 +94,8 @@ it('uses instancing and the reduced mobile segment budget', () => withCanvasCont
   });
 
   expect(tunnel.segmentCount).toBe(16);
-  expect(instances).toHaveLength(6);
+  expect(instances).toHaveLength(7);
+  expect(tunnel.root.getObjectByName('panel-detail-instances')).toMatchObject({ visible: false });
   tunnel.dispose();
   materials.dispose();
 }));
@@ -105,7 +109,7 @@ it('updates the existing gate label texture instead of allocating scene objects'
   tunnel.update(250, 2);
 
   expect((label.material as THREE.MeshBasicMaterial).map).toBe(texture);
-  expect(tunnel.root.getObjectByName('active-gate')!.position.z).toBe(-250);
+  expect(tunnel.root.getObjectByName('active-gate')!.position.z).toBe(-251);
   tunnel.dispose();
   materials.dispose();
 }));

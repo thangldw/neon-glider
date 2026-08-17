@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 
 export interface NeonMaterials {
-  readonly cyan: THREE.MeshBasicMaterial;
-  readonly magenta: THREE.MeshBasicMaterial;
-  readonly metal: THREE.MeshPhongMaterial;
-  readonly obstacle: THREE.MeshPhongMaterial;
+  readonly cyan: THREE.MeshStandardMaterial;
+  readonly magenta: THREE.MeshStandardMaterial;
+  readonly metal: THREE.MeshStandardMaterial;
+  readonly obstacle: THREE.MeshStandardMaterial;
   readonly obstacleEdge: THREE.MeshBasicMaterial;
-  readonly crystal: THREE.MeshPhongMaterial;
-  readonly floor: THREE.MeshPhongMaterial;
+  readonly crystal: THREE.MeshPhysicalMaterial;
+  readonly floor: THREE.MeshStandardMaterial;
   readonly trailCyan: THREE.MeshBasicMaterial;
   readonly trailMagenta: THREE.MeshBasicMaterial;
   readonly ownsMaterials: true;
@@ -15,28 +15,34 @@ export interface NeonMaterials {
 }
 
 export function createNeonMaterials(): NeonMaterials {
-  const cyan = new THREE.MeshBasicMaterial({
-    color: 0x3cecff,
-    toneMapped: false,
+  const cyan = new THREE.MeshStandardMaterial({
+    color: 0x062f3b,
+    emissive: 0x00cfff,
+    emissiveIntensity: 1.3,
+    metalness: 0.42,
+    roughness: 0.2,
   });
-  const magenta = new THREE.MeshBasicMaterial({
-    color: 0xff31cf,
-    toneMapped: false,
+  const magenta = new THREE.MeshStandardMaterial({
+    color: 0x43072f,
+    emissive: 0xff20c8,
+    emissiveIntensity: 1.2,
+    metalness: 0.38,
+    roughness: 0.22,
   });
-  const metal = new THREE.MeshPhongMaterial({
-    color: 0x365f92,
-    emissive: 0x07142f,
-    emissiveIntensity: 0.8,
-    specular: 0x3b75a8,
-    shininess: 42,
+  const metal = new THREE.MeshStandardMaterial({
+    color: 0x5479ad,
+    emissive: 0x153766,
+    emissiveIntensity: 0.84,
+    metalness: 0.68,
+    roughness: 0.24,
     flatShading: true,
   });
-  const obstacle = new THREE.MeshPhongMaterial({
-    color: 0x541440,
-    emissive: 0x560330,
-    emissiveIntensity: 0.9,
-    specular: 0xff5cd8,
-    shininess: 65,
+  const obstacle = new THREE.MeshStandardMaterial({
+    color: 0x35102b,
+    emissive: 0x4b032d,
+    emissiveIntensity: 0.85,
+    metalness: 0.72,
+    roughness: 0.26,
     flatShading: true,
   });
   const obstacleEdge = new THREE.MeshBasicMaterial({
@@ -48,22 +54,24 @@ export function createNeonMaterials(): NeonMaterials {
     polygonOffset: true,
     polygonOffsetFactor: -1,
   });
-  const crystal = new THREE.MeshPhongMaterial({
-    color: 0xb9fbff,
-    emissive: 0x25dff4,
-    emissiveIntensity: 0.85,
-    specular: 0xffffff,
-    shininess: 110,
+  const crystal = new THREE.MeshPhysicalMaterial({
+    color: 0x9cfaff,
+    emissive: 0x16dff5,
+    emissiveIntensity: 2,
+    metalness: 0.12,
+    roughness: 0.08,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
     flatShading: true,
     transparent: true,
     opacity: 0.96,
   });
-  const floor = new THREE.MeshPhongMaterial({
-    color: 0x22598b,
-    emissive: 0x03152f,
-    emissiveIntensity: 0.75,
-    specular: 0x2ebde4,
-    shininess: 35,
+  const floor = new THREE.MeshStandardMaterial({
+    color: 0x456f9f,
+    emissive: 0x102f60,
+    emissiveIntensity: 0.82,
+    metalness: 0.78,
+    roughness: 0.18,
     flatShading: true,
   });
   const trailCyan = new THREE.MeshBasicMaterial({
@@ -75,14 +83,14 @@ export function createNeonMaterials(): NeonMaterials {
     toneMapped: false,
   });
   const trailMagenta = new THREE.MeshBasicMaterial({
-    color: 0xff8ce8,
+    color: 0xff20c8,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.62,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
-  const palette: THREE.Material[] = [
+  const palette: { dispose(): void }[] = [
     cyan,
     magenta,
     metal,

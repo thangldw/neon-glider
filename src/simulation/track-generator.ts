@@ -8,11 +8,14 @@ const OBSTACLE_KINDS: readonly TrackEntityKind[] = ['cube', 'prism', 'wall'];
 const RNG_INCREMENT = 0x6d2b79f5n;
 const RNG_CALLS_PER_SEGMENT = 7n;
 const UINT32_MODULUS = 0x1_0000_0000n;
+const CORRIDOR_HOLD_SEGMENTS = 4;
+const CORRIDOR_SEQUENCE: readonly Lane[] = [0, 1, 2, 1];
 
 export interface GeneratedSegment {
   rngState: number;
   entities: TrackEntity[];
   reachableLanes: Lane[];
+  corridorLane?: Lane;
 }
 
 export function runnerRngStateAt(seed: number, segment: number): number {
@@ -25,15 +28,26 @@ export function generateRunnerSegment(seed: number, segment: number, tier = 0): 
   assertNonNegativeInteger(tier, 'tier');
   const rng = createRng(runnerRngStateAt(seed, segment));
   const obstacleCountRoll = rng.next();
-  const corridorRoll = rng.next();
+  const firstLaneRoll = rng.next();
   rng.next();
   const obstacleKindRoll = rng.next();
   const secondObstacleKindRoll = rng.next();
   const crystalRoll = rng.next();
   const crystalLaneRoll = rng.next();
-  const obstacleCount = tier < 2 || obstacleCountRoll < 0.5 ? 1 : 2;
-  const obstacleLanes: Lane[] = [corridorRoll < 0.5 ? 0 : 2];
-  if (obstacleCount === 2) obstacleLanes.push(obstacleLanes[0] === 0 ? 2 : 0);
+  const corridorIndex = Math.floor(segment / CORRIDOR_HOLD_SEGMENTS);
+  const corridorPhase = ((seed >>> 0) % CORRIDOR_SEQUENCE.length + corridorIndex) % CORRIDOR_SEQUENCE.length;
+  const corridorLane = CORRIDOR_SEQUENCE[corridorPhase];
+  const transitionSegment = segment % CORRIDOR_HOLD_SEGMENTS === CORRIDOR_HOLD_SEGMENTS - 1;
+  const nextCorridorLane = CORRIDOR_SEQUENCE[(corridorPhase + 1) % CORRIDOR_SEQUENCE.length];
+  const protectedLanes = transitionSegment ? [corridorLane, nextCorridorLane] : [corridorLane];
+  const obstacleCandidates = LANES.filter((lane) => !protectedLanes.includes(lane));
+  const obstacleCount = tier < 2 || transitionSegment || obstacleCountRoll < 0.5 ? 1 : 2;
+  const obstacleLanes: Lane[] = [];
+  const firstObstacleIndex = Math.floor(firstLaneRoll * obstacleCandidates.length);
+  obstacleLanes.push(obstacleCandidates[firstObstacleIndex]);
+  if (obstacleCount === 2) {
+    obstacleLanes.push(obstacleCandidates[firstObstacleIndex === 0 ? 1 : 0]);
+  }
   const reachableLanes = LANES.filter((lane) => !obstacleLanes.includes(lane));
   const distance = SPAWN_OFFSET + segment * SEGMENT_LENGTH;
   const entities: TrackEntity[] = obstacleLanes.map((lane, index) => ({
@@ -47,7 +61,7 @@ export function generateRunnerSegment(seed: number, segment: number, tier = 0): 
     const lane = reachableLanes[Math.floor(crystalLaneRoll * reachableLanes.length)];
     entities.push({ id: `segment-${segment}-crystal`, kind: 'crystal', lane, distance, segment });
   }
-  return { rngState: rng.state(), entities, reachableLanes };
+  return { rngState: rng.state(), entities, reachableLanes, corridorLane };
 }
 
 function assertNonNegativeInteger(value: number, name: string): void {

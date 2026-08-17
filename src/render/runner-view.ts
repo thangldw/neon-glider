@@ -80,7 +80,7 @@ function defaultRenderer(canvas: HTMLCanvasElement): RendererLike {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.96;
+  renderer.toneMappingExposure = 0.82;
   return renderer;
 }
 
@@ -117,6 +117,7 @@ function createSpeedStreaks(quality: 'desktop' | 'mobile', materials: NeonMateri
   });
   const points = new THREE.Points(geometry, material);
   points.name = 'speed-streaks';
+  points.visible = quality === 'desktop';
   points.frustumCulled = false;
   let disposed = false;
 
@@ -230,18 +231,32 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       const shipAnchor = new THREE.Group();
       shipAnchor.name = 'neon-ship-anchor';
       shipAnchor.position.set(0, quality === 'mobile' ? -2.25 : -0.9, quality === 'mobile' ? 2.2 : -3);
-      shipAnchor.scale.setScalar(quality === 'mobile' ? 0.55 : 0.75);
+      shipAnchor.scale.setScalar(quality === 'mobile' ? 0.5 : 0.75);
       shipAnchor.add(ship.root);
 
       scene.add(tunnel.root, entityField.root, streaks.points, shipAnchor);
-      scene.add(new THREE.HemisphereLight(0x72cfff, 0x160016, 0.82));
-      const key = new THREE.DirectionalLight(0xb7eaff, 1.45);
+      for (const name of [
+        'cyan-ribs',
+        'magenta-ribs',
+        'active-gate-frame',
+        'active-gate-accent',
+        'crystal-entity-batch',
+        'speed-streaks',
+      ]) {
+        scene.getObjectByName(name)?.layers.enable(1);
+      }
+      scene.add(new THREE.HemisphereLight(0x72cfff, 0x24001d, 1.15));
+      const key = new THREE.DirectionalLight(0xc790ff, 2.1);
       key.position.set(2.5, 7, 5);
       scene.add(key);
+      const cyanFill = new THREE.PointLight(0x00cfff, quality === 'desktop' ? 5 : 4, 38, 2);
+      cyanFill.position.set(-4.2, -0.6, 5.5);
+      scene.add(cyanFill);
       const postFxFactory = options.createPostFx ?? createPostFx;
       try {
         postFx = postFxFactory(renderer, scene, camera, {
-          enabled: false,
+          enabled: true,
+          bloomLayer: 1,
           quality,
           width,
           height,
@@ -291,16 +306,16 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     const aspect = width / height;
     target.camera.aspect = aspect;
     target.camera.updateProjectionMatrix();
-    target.shipAnchor.scale.setScalar(target.quality === 'mobile' ? 0.55 : 0.75);
+    target.shipAnchor.scale.setScalar(target.quality === 'mobile' ? 0.5 : 0.75);
   }
 
-  function reconcile(target: SceneGraph, deltaSeconds: number): void {
+  function reconcile(target: SceneGraph, deltaSeconds: number, snapLane = false): void {
     const snapshot = latestSnapshot;
     const reducedMotion = effectiveReducedMotion();
     if (snapshot) {
       target.tunnel.update(snapshot.distance, snapshot.gates + 1);
       target.entityField.sync(snapshot.entities, snapshot.distance);
-      target.ship.setLaneX(LANE_X[snapshot.lane], deltaSeconds, reducedMotion);
+      target.ship.setLaneX(LANE_X[snapshot.lane], deltaSeconds, snapLane || reducedMotion);
       target.ship.update(visualElapsedSeconds, snapshot.speed, reducedMotion);
       target.streaks.update(snapshot.distance, visualElapsedSeconds, snapshot.speed, reducedMotion);
     } else {
@@ -323,7 +338,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
   function replaceGraph(quality: 'desktop' | 'mobile', width: number, height: number): void {
     const replacement = createSceneGraph(quality, width, height);
     applyCameraLayout(replacement, width, height);
-    reconcile(replacement, 0);
+    reconcile(replacement, 0, true);
     replacement.postFx.setSize(width, height);
     const previous = graph;
     graph = replacement;
@@ -336,7 +351,8 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     const quality = responsiveQuality(width, height);
     if (graph && quality !== graph.quality) replaceGraph(quality, width, height);
     applyCameraLayout(graph, width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    renderer.setPixelRatio(Math.min(devicePixelRatio, graph.quality === 'mobile' ? 1.35 : 2));
     renderer.setSize(width, height);
     graph.postFx.setSize(width, height);
   }

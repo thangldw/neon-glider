@@ -90,6 +90,69 @@ function start(app: ReturnType<typeof createAppController>) {
 }
 
 describe('runner lifecycle', () => {
+  it('idempotently tears down an active countdown, frame, actions, view, monitor, and visibility listener', () => {
+    vi.useFakeTimers();
+    window.history.replaceState(null, '', '/?diagnostics=1');
+    const view = runnerView();
+    const unbind = vi.fn();
+    const cancelFrame = vi.fn();
+    const removeListener = vi.spyOn(document, 'removeEventListener');
+    const app = createAppController(root, dependencies({
+      createRunnerView: () => view,
+      bindActions: vi.fn(() => unbind),
+      requestFrame: vi.fn(() => 73),
+      cancelFrame,
+    }));
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')!.click();
+
+    expect(app.getState().screen).toBe('countdown');
+    expect(document.querySelector('[data-perf-overlay]')).toBeTruthy();
+    app.destroy();
+    app.destroy();
+    vi.advanceTimersByTime(5_000);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(app.getState().screen).toBe('countdown');
+    expect(cancelFrame).toHaveBeenCalledOnce();
+    expect(cancelFrame).toHaveBeenCalledWith(73);
+    expect(unbind).toHaveBeenCalledOnce();
+    expect(view.dispose).toHaveBeenCalledOnce();
+    expect(document.querySelector('[data-perf-overlay]')).toBeNull();
+    expect(removeListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+  });
+
+  it('keeps one semantic warning and uninterrupted in-memory play when every storage operation fails', () => {
+    vi.useFakeTimers();
+    const unavailable = <T,>(fallback: T) => (onUnavailable: () => void): T => {
+      onUnavailable();
+      return fallback;
+    };
+    const app = createAppController(root, dependencies({
+      loadProfile: unavailable(createDefaultProfile()),
+      loadRunner: unavailable(null),
+      saveRunner: (run, onUnavailable) => {
+        expect(run.schemaVersion).toBe(2);
+        onUnavailable();
+        return false;
+      },
+      saveProfile: (_profile, onUnavailable) => {
+        onUnavailable();
+        return false;
+      },
+      clearRunner: (onUnavailable) => onUnavailable(),
+    }));
+
+    expect(root.querySelectorAll('[data-storage-warning]')).toHaveLength(1);
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')!.click();
+    vi.advanceTimersByTime(3_000);
+    expect(app.getState()).toMatchObject({ screen: 'playing', run: { status: 'playing', schemaVersion: 2 } });
+    expect(root.querySelectorAll('[data-storage-warning]')).toHaveLength(1);
+    app.test?.forceEnd('collision');
+    expect(app.getState().screen).toBe('result');
+    expect(root.querySelectorAll('[data-storage-warning]')).toHaveLength(1);
+    app.destroy();
+  });
+
   it('starts, advances, and checkpoints one deterministic run from one frame loop', () => {
     const frames = frameHarness();
     const saveRunner = vi.fn(() => true);

@@ -35,13 +35,25 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   root.name = 'neon-ship';
   const geometries = new Set<THREE.BufferGeometry>();
   const shipMetal = materials.metal.clone();
-  shipMetal.color.setHex(0x46689c);
-  shipMetal.emissive.setHex(0x0a1c4c);
-  shipMetal.emissiveIntensity = 0.82;
-  shipMetal.specular.setHex(0x85cfff);
-  shipMetal.shininess = 55;
+  shipMetal.color.setHex(0x3f669c);
+  shipMetal.emissive.setHex(0x102d61);
+  shipMetal.emissiveIntensity = 1.15;
+  shipMetal.metalness = 0.72;
+  shipMetal.roughness = 0.2;
   shipMetal.flatShading = true;
   shipMetal.wireframe = false;
+  shipMetal.map = null;
+  shipMetal.emissiveMap = null;
+  const armorMaterial = shipMetal.clone();
+  armorMaterial.color.setHex(0x8bbdf5);
+  armorMaterial.emissive.setHex(0x2d7ee8);
+  armorMaterial.emissiveIntensity = 1.65;
+  armorMaterial.roughness = 0.28;
+  const cockpitMaterial = materials.cyan.clone();
+  cockpitMaterial.color.setHex(0x041522);
+  cockpitMaterial.emissiveIntensity = 0.92;
+  cockpitMaterial.metalness = 0.7;
+  cockpitMaterial.roughness = 0.16;
 
   function own<T extends THREE.BufferGeometry>(geometry: T): T {
     geometries.add(geometry);
@@ -59,6 +71,28 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
     mesh.position.set(...position);
     root.add(mesh);
     return mesh;
+  }
+
+  function mergeParts(parts: readonly {
+    geometry: THREE.BufferGeometry;
+    position: readonly [number, number, number];
+    scale?: readonly [number, number, number];
+    rotationY?: number;
+  }[]): THREE.BufferGeometry {
+    const transform = new THREE.Object3D();
+    const copies = parts.map(({ geometry, position, scale = [1, 1, 1], rotationY = 0 }) => {
+      transform.position.set(...position);
+      transform.scale.set(...scale);
+      transform.rotation.set(0, rotationY, 0);
+      transform.updateMatrix();
+      const copy = geometry.clone().applyMatrix4(transform.matrix);
+      copy.deleteAttribute('uv');
+      return copy;
+    });
+    const merged = mergeGeometries(copies, false);
+    for (const copy of copies) copy.dispose();
+    if (!merged) throw new Error('Unable to merge ship geometry');
+    return own(merged);
   }
 
   const unitBox = own(new THREE.BoxGeometry(1, 1, 1));
@@ -96,31 +130,29 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   panelMarker.userData.panelCount = 3;
   root.add(panelMarker);
 
-  add('fuselage', fuselageGeometry, shipMetal, [0, 0, -0.1]);
-  add('wing-right', wingGeometry, shipMetal, [0.12, -0.08, 0]);
-  const leftWing = add('wing-left', wingGeometry, shipMetal, [-0.12, -0.08, 0]);
-  leftWing.scale.x = -1;
-
-  const armorSpine = add('armor-spine', unitBox, shipMetal, [0, 0.23, 0.1]);
-  armorSpine.scale.set(0.42, 0.34, 2.15);
-  const armorLeft = add('armor-left', unitBox, shipMetal, [-0.58, 0.02, 0.35]);
-  armorLeft.scale.set(0.45, 0.32, 1.55);
-  armorLeft.rotation.y = -0.16;
-  const armorRight = add('armor-right', unitBox, shipMetal, [0.58, 0.02, 0.35]);
-  armorRight.scale.set(0.45, 0.32, 1.55);
-  armorRight.rotation.y = 0.16;
-
-  add('engine-left', engineGeometry, shipMetal, [-1.12, -0.12, 0.72]);
-  add('engine-right', engineGeometry, shipMetal, [1.12, -0.12, 0.72]);
+  const airframeGeometry = mergeParts([
+    { geometry: fuselageGeometry, position: [0, 0, -0.1] },
+    { geometry: wingGeometry, position: [0.12, -0.08, 0] },
+    { geometry: wingGeometry, position: [-0.12, -0.08, 0], scale: [-1, 1, 1] },
+    { geometry: engineGeometry, position: [-1.12, -0.12, 0.72] },
+    { geometry: engineGeometry, position: [1.12, -0.12, 0.72] },
+  ]);
+  add('airframe', airframeGeometry, shipMetal, [0, 0, 0]);
+  const armorGeometry = mergeParts([
+    { geometry: unitBox, position: [0, 0.23, 0.1], scale: [0.42, 0.34, 2.15] },
+    { geometry: unitBox, position: [-0.58, 0.02, 0.35], scale: [0.45, 0.32, 1.55], rotationY: -0.16 },
+    { geometry: unitBox, position: [0.58, 0.02, 0.35], scale: [0.45, 0.32, 1.55], rotationY: 0.16 },
+  ]);
+  add('armor-panels', armorGeometry, armorMaterial, [0, 0, 0]);
   const glowLeft = add('engine-glow-left', glowGeometry, materials.magenta, [-1.12, -0.12, 1.38]);
   const glowRight = add('engine-glow-right', glowGeometry, materials.magenta, [1.12, -0.12, 1.38]);
-  add('cockpit-light', cockpitGeometry, materials.cyan, [0, 0.45, -0.72]);
+  add('cockpit-light', cockpitGeometry, cockpitMaterial, [0, 0.45, -0.72]);
 
   const edgeLeft = add('edge-light-left', unitBox, materials.magenta, [-1.75, 0.02, 0.52]);
-  edgeLeft.scale.set(1.45, 0.075, 0.1);
+  edgeLeft.scale.set(1.55, 0.11, 0.14);
   edgeLeft.rotation.y = -0.58;
   const edgeRight = add('edge-light-right', unitBox, materials.magenta, [1.75, 0.02, 0.52]);
-  edgeRight.scale.set(1.45, 0.075, 0.1);
+  edgeRight.scale.set(1.55, 0.11, 0.14);
   edgeRight.rotation.y = 0.58;
 
   const trimLeft = add('trim-cyan-left', unitBox, materials.cyan, [-0.68, 0.2, -0.18]);
@@ -177,6 +209,8 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
       root.clear();
       for (const geometry of geometries) geometry.dispose();
       shipMetal.dispose();
+      armorMaterial.dispose();
+      cockpitMaterial.dispose();
     },
   };
 }

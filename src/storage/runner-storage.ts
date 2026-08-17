@@ -114,6 +114,8 @@ export function isRunnerState(value: unknown): value is RunnerState {
   const segmentCursor = value.segmentCursor;
   const seed = value.seed;
   const gates = value.gates;
+  const expectedSpeed = Math.min(START_SPEED + (typeof gates === 'number' ? gates : 0) * 1.5, MAX_SPEED);
+  const expectedMultiplier = Math.min(1 + (typeof gates === 'number' ? gates : 0) * 0.25, 8);
 
   if (value.schemaVersion !== 2 || value.gameVersion !== GAME_VERSION
     || !isUint32(seed) || !isUint32(value.rngState)
@@ -121,10 +123,12 @@ export function isRunnerState(value: unknown): value is RunnerState {
     || (value.status === 'complete' ? value.endReason === null : value.endReason !== null)
     || typeof value.reducedMotion !== 'boolean' || !isLane(value.lane)
     || !isFiniteNonNegative(distance)
-    || typeof value.speed !== 'number' || !Number.isFinite(value.speed) || value.speed < START_SPEED || value.speed > MAX_SPEED
+    || typeof value.speed !== 'number' || !Number.isFinite(value.speed) || value.speed !== expectedSpeed
     || typeof value.energy !== 'number' || !Number.isFinite(value.energy) || value.energy < 0 || value.energy > 100
+    || ((value.status === 'playing' || value.status === 'paused') && value.energy === 0)
+    || (value.endReason === 'depleted' && value.energy !== 0)
     || !isFiniteNonNegative(value.score)
-    || typeof value.multiplier !== 'number' || !Number.isFinite(value.multiplier) || value.multiplier < 1 || value.multiplier > 8
+    || typeof value.multiplier !== 'number' || !Number.isFinite(value.multiplier) || value.multiplier !== expectedMultiplier
     || !isNonNegativeSafeInteger(gates) || gates !== Math.floor(distance / GATE_DISTANCE)
     || !isNonNegativeSafeInteger(value.crystals) || !isNonNegativeSafeInteger(segmentCursor)
     || !hasBoundedCursor(value.status, distance, segmentCursor)) {

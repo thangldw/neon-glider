@@ -67,12 +67,39 @@ it('derives a random-access runner corridor without replaying earlier segments',
   expect(generated.entities.every((entity) => entity.segment === segment)).toBe(true);
 });
 
-it('retains tiered two-obstacle runner segments while keeping the shared corridor open', () => {
-  const generated = Array.from({ length: 100 }, (_, seed) => generateRunnerSegment(seed, 100, 2))
-    .find((segment) => segment.entities.filter((entity) => entity.kind !== 'crystal').length === 2);
+it('rotates the shared production corridor while keeping every adjacent segment reachable', () => {
+  for (const seed of [0, 1, 91, 0xffff_ffff]) {
+    let previous: ReturnType<typeof generateRunnerSegment> | null = null;
+    let previousCorridor: Lane | null = null;
+    const blockedAcrossRun = new Set<Lane>();
+    const soleOpenAcrossRun = new Set<Lane>();
 
-  expect(generated).toBeDefined();
-  expect(generated?.reachableLanes).toContain(1);
+    for (let segment = 0; segment < 10_000; segment += 1) {
+      const generated = generateRunnerSegment(seed, segment, 8);
+      const blocked = generated.entities
+        .filter((entity) => entity.kind !== 'crystal')
+        .map((entity) => entity.lane);
+      blocked.forEach((lane) => blockedAcrossRun.add(lane));
+      if (generated.reachableLanes.length === 1) soleOpenAcrossRun.add(generated.reachableLanes[0]);
+      if (segment % 4 === 0) {
+        expect(generated.corridorLane).toBeDefined();
+        if (previousCorridor !== null) {
+          expect(Math.abs(generated.corridorLane! - previousCorridor)).toBeLessThanOrEqual(1);
+        }
+        previousCorridor = generated.corridorLane!;
+      }
+      if (previous) {
+        expect(
+          generated.reachableLanes.some((lane) => previous?.reachableLanes.includes(lane)),
+          `seed ${seed}, segment ${segment}`,
+        ).toBe(true);
+      }
+      previous = generated;
+    }
+
+    expect([...blockedAcrossRun].sort()).toEqual([0, 1, 2]);
+    expect([...soleOpenAcrossRun].sort()).toEqual([0, 1, 2]);
+  }
 });
 
 it('rejects invalid numeric inputs without imposing a run-distance cap', () => {

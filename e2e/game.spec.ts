@@ -16,7 +16,7 @@ type RunSnapshot = {
   crystals: number;
   status: 'playing' | 'paused' | 'complete';
   endReason: 'collision' | 'depleted' | null;
-  entities: Array<{ kind: 'cube' | 'prism' | 'wall' | 'crystal'; lane: Lane; distance: number }>;
+  entities: Array<{ kind: 'cube' | 'prism' | 'wall' | 'crystal'; lane: Lane; distance: number; segment: number }>;
   [key: string]: unknown;
 };
 
@@ -270,6 +270,71 @@ test('reaches deterministic speed and multiplier caps without collisions', async
   const capped = await advanceSafelyTo(page, 7_300);
   expect(capped.run).toMatchObject({ speed: 52, multiplier: 8 });
   expect(capped.run?.gates).toBeGreaterThanOrEqual(29);
+});
+
+test('production generation blocks every lane while preserving an adjacent reachable route', async ({ page }) => {
+  await startRun(page, 47);
+  const coverage = await page.evaluate(() => {
+    const api = (window as typeof window & {
+      __NEON_GLIDER_E2E__?: {
+        snapshot(): E2ESnapshot;
+        setLane(lane: Lane): void;
+        advance(seconds: number): void;
+      };
+    }).__NEON_GLIDER_E2E__;
+    if (!api) throw new Error('E2E hook unavailable');
+    const lanes: Lane[] = [0, 1, 2];
+    const patterns = new Map<number, Set<Lane>>();
+    let guard = 0;
+    while ((api.snapshot().run?.distance ?? 5_000) < 5_000 && guard < 4_000) {
+      const current = api.snapshot().run;
+      if (!current || current.status !== 'playing') break;
+      for (const entity of current.entities) {
+        if (entity.kind === 'crystal') continue;
+        const blocked = patterns.get(entity.segment) ?? new Set<Lane>();
+        blocked.add(entity.lane);
+        patterns.set(entity.segment, blocked);
+      }
+      const stepDistance = current.speed * 0.25;
+      const crossing = current.entities.filter((entity) => (
+        entity.distance > current.distance && entity.distance <= current.distance + stepDistance + 0.001
+      ));
+      const blocked = new Set(crossing.filter((entity) => entity.kind !== 'crystal').map((entity) => entity.lane));
+      const crystal = crossing.find((entity) => entity.kind === 'crystal' && !blocked.has(entity.lane));
+      api.setLane(crystal?.lane ?? lanes.find((lane) => !blocked.has(lane)) ?? current.lane);
+      api.advance(0.25);
+      guard += 1;
+    }
+    const blockedAcrossRun = new Set<Lane>();
+    const soleOpenAcrossRun = new Set<Lane>();
+    let previousOpen: Lane[] | null = null;
+    let transitionSafe = true;
+    for (const [, blocked] of [...patterns].sort(([left], [right]) => left - right)) {
+      blocked.forEach((lane) => blockedAcrossRun.add(lane));
+      const open = lanes.filter((lane) => !blocked.has(lane));
+      if (open.length === 1) {
+        soleOpenAcrossRun.add(open[0]);
+      }
+      if (previousOpen && !open.some((lane) => previousOpen?.includes(lane))) transitionSafe = false;
+      previousOpen = open;
+    }
+    const final = api.snapshot().run;
+    return {
+      blocked: [...blockedAcrossRun].sort(),
+      soleOpen: [...soleOpenAcrossRun].sort(),
+      transitionSafe,
+      status: final?.status,
+      distance: final?.distance ?? 0,
+    };
+  });
+
+  expect(coverage).toMatchObject({
+    blocked: [0, 1, 2],
+    soleOpen: [0, 1, 2],
+    transitionSafe: true,
+    status: 'playing',
+  });
+  expect(coverage.distance).toBeGreaterThanOrEqual(5_000);
 });
 
 test('keeps the full ship visible in all lanes without horizontal overflow', async ({ page }) => {

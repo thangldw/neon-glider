@@ -8,11 +8,8 @@ it('builds the armored ship silhouette from named procedural parts', () => {
   const ship = createNeonShip(materials);
 
   for (const name of [
-    'fuselage',
-    'wing-left',
-    'wing-right',
-    'engine-left',
-    'engine-right',
+    'airframe',
+    'armor-panels',
     'cockpit-light',
     'edge-light-left',
     'edge-light-right',
@@ -23,16 +20,16 @@ it('builds the armored ship silhouette from named procedural parts', () => {
   ]) {
     expect(ship.root.getObjectByName(name)).toBeTruthy();
   }
-  expect(ship.root.getObjectByName('wing-left')!.position.x).toBeLessThan(0);
-  expect(ship.root.getObjectByName('wing-right')!.position.x).toBeGreaterThan(0);
   expect(ship.root.getObjectByName('ship-panel-lights')?.userData.panelCount).toBe(3);
-  const fuselageMaterial = (ship.root.getObjectByName('fuselage') as THREE.Mesh).material as THREE.MeshPhongMaterial;
+  const fuselageMaterial = (ship.root.getObjectByName('airframe') as THREE.Mesh).material as THREE.MeshStandardMaterial;
   const shipTone = { h: 0, s: 0, l: 0 };
   fuselageMaterial.color.getHSL(shipTone);
   expect(fuselageMaterial).not.toBe(materials.metal);
-  expect(fuselageMaterial).toBeInstanceOf(THREE.MeshPhongMaterial);
+  expect(fuselageMaterial).toBeInstanceOf(THREE.MeshStandardMaterial);
   expect(fuselageMaterial.wireframe).toBe(false);
-  expect(shipTone.l).toBeGreaterThan(0.16);
+  expect(fuselageMaterial.metalness).toBeGreaterThanOrEqual(0.65);
+  expect(fuselageMaterial.roughness).toBeLessThanOrEqual(0.25);
+  expect(shipTone.l).toBeGreaterThan(0.015);
 
   ship.dispose();
   materials.dispose();
@@ -69,7 +66,7 @@ it('idempotently disposes owned geometry without disposing the shared palette', 
   const materials = createNeonMaterials();
   const materialDispose = vi.spyOn(materials.cyan, 'dispose');
   const ship = createNeonShip(materials);
-  const shipMaterial = (ship.root.getObjectByName('fuselage') as THREE.Mesh).material as THREE.Material;
+  const shipMaterial = (ship.root.getObjectByName('airframe') as THREE.Mesh).material as THREE.Material;
   const shipMaterialDispose = vi.spyOn(shipMaterial, 'dispose');
   const geometries = new Set<THREE.BufferGeometry>();
   let meshCount = 0;

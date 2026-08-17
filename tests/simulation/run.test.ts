@@ -84,10 +84,45 @@ describe('Neon Glider simulation', () => {
 
   it('ends when energy reaches zero and never exceeds speed or multiplier caps', () => {
     const depleted = advanceRunner({ ...createRunner(7), energy: 0.01, entities: [] }, 0.25);
-    expect(depleted).toMatchObject({ status: 'complete', endReason: 'depleted', energy: 0 });
+    expect(depleted).toMatchObject({
+      status: 'complete',
+      endReason: 'depleted',
+      energy: 0,
+    });
+    expect(depleted.distance).toBeCloseTo(0.104);
+    expect(depleted.score).toBeCloseTo(1.04);
     const capped = advanceRunner({ ...createRunner(8), gates: 40, speed: 52, multiplier: 8, entities: [] }, 0.1);
     expect(capped.speed).toBe(52);
     expect(capped.multiplier).toBe(8);
+  });
+
+  it('uses a restorative event before projected depletion and stops exactly if energy later expires', () => {
+    const run = {
+      ...createRunner(7),
+      energy: 0.2,
+      entities: [
+        { id: 'rescue', kind: 'crystal' as const, lane: 1 as const, distance: 1, segment: 0 },
+      ],
+    };
+
+    const next = advanceRunner(run, 0.25);
+
+    expect(next).toMatchObject({ status: 'playing', endReason: null, distance: 6.5, crystals: 1 });
+    expect(next.energy).toBeCloseTo(14.575);
+  });
+
+  it('resolves an exact depletion tie at a restorative gate before ending the run', () => {
+    const run = {
+      ...createRunner(7),
+      distance: 249,
+      energy: 2.5 / 26,
+      entities: [],
+    };
+
+    const next = advanceRunner(run, 1 / 26);
+
+    expect(next).toMatchObject({ status: 'playing', endReason: null, distance: 250, gates: 1 });
+    expect(next.energy).toBeCloseTo(5);
   });
 
   it('rejects invalid deltas and leaves a non-playing state unchanged', () => {
