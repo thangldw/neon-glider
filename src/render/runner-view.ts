@@ -18,6 +18,8 @@ export const MAX_RUNNER_FRAME_DELTA_SECONDS = 0.25;
 
 const LANE_X: Record<Lane, number> = { 0: -3, 1: 0, 2: 3 };
 const MOBILE_WIDTH = 640;
+const BLOOM_LAYER = 1;
+const DETAIL_LAYER = 2;
 
 export interface FramingDiagnostics {
   gliderNdcX: number;
@@ -108,7 +110,15 @@ function sceneResourceCounts(scene: THREE.Scene): { geometries: number; textures
 
 function directPostFx(renderer: RendererLike, scene: THREE.Scene, camera: THREE.Camera): PostFx {
   return {
-    render: () => renderer.render(scene, camera),
+    render: () => {
+      const originalLayerMask = camera.layers.mask;
+      camera.layers.enableAll();
+      try {
+        renderer.render(scene, camera);
+      } finally {
+        camera.layers.mask = originalLayerMask;
+      }
+    },
     setSize: () => undefined,
     dispose: () => undefined,
   };
@@ -170,6 +180,27 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       shipAnchor.add(ship.root);
 
       scene.add(tunnel.root, entityField.root, atmosphere.root, shipAnchor);
+      if (quality === 'desktop') {
+        const moveRenderablesToDetailLayer = (object: THREE.Object3D): void => {
+          object.traverse((descendant) => {
+            if (descendant instanceof THREE.Mesh) descendant.layers.set(DETAIL_LAYER);
+          });
+        };
+        moveRenderablesToDetailLayer(ship.root);
+        moveRenderablesToDetailLayer(entityField.root);
+        for (const name of [
+          'cyan-ribs',
+          'magenta-ribs',
+          'floor-seam-instances',
+          'panel-detail-instances',
+          'active-gate-frame',
+          'active-gate-accent',
+          'gate-number',
+        ]) {
+          const detail = scene.getObjectByName(name);
+          if (detail) detail.layers.set(DETAIL_LAYER);
+        }
+      }
       for (const name of [
         'cyan-ribs',
         'magenta-ribs',
@@ -178,21 +209,25 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
         'crystal-entity-batch',
         'speed-streaks',
       ]) {
-        scene.getObjectByName(name)?.layers.enable(1);
+        scene.getObjectByName(name)?.layers.enable(BLOOM_LAYER);
       }
-      scene.add(new THREE.HemisphereLight(0x74d9ff, 0x210019, 0.9));
+      const hemisphere = new THREE.HemisphereLight(0x74d9ff, 0x210019, 0.9);
       const key = new THREE.DirectionalLight(0xb889ff, 1.7);
       key.position.set(2.5, 7, 5);
       const cyanFill = new THREE.PointLight(0x00cfff, quality === 'desktop' ? 4.2 : 3.2, 34, 2);
       cyanFill.position.set(-4, -0.5, 4);
       const magentaRim = new THREE.PointLight(0xff20c8, quality === 'desktop' ? 2.8 : 2.2, 28, 2);
       magentaRim.position.set(4, 1.4, -6);
-      scene.add(key, cyanFill, magentaRim);
+      if (quality === 'desktop') {
+        for (const light of [hemisphere, key, cyanFill, magentaRim]) light.layers.enable(DETAIL_LAYER);
+      }
+      scene.add(hemisphere, key, cyanFill, magentaRim);
       const postFxFactory = options.createPostFx ?? createPostFx;
       try {
         postFx = postFxFactory(renderer, scene, camera, {
           enabled: true,
-          bloomLayer: 1,
+          bloomLayer: BLOOM_LAYER,
+          detailLayer: quality === 'desktop' ? DETAIL_LAYER : undefined,
           quality,
           width,
           height,
@@ -288,7 +323,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     if (graph && quality !== graph.quality) replaceGraph(quality, width, height);
     applyCameraLayout(graph, width, height);
     const devicePixelRatio = window.devicePixelRatio || 1;
-    renderer.setPixelRatio(Math.min(devicePixelRatio, graph.quality === 'mobile' ? 1.35 : 2));
+    renderer.setPixelRatio(Math.min(devicePixelRatio, graph.quality === 'mobile' ? 1.35 : 1));
     renderer.setSize(width, height);
     graph.postFx.setSize(width, height);
   }

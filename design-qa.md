@@ -14,15 +14,17 @@
 
 1. The first visual-polish capture kept the transmissive gate plane visible at long range. It flattened tunnel depth and partially obscured obstacles and crystals, a P2 readability mismatch.
 2. Review showed that the bounded transmissive plane still became an opaque wall near 247 m and raised the real-render path to 70 desktop / 61 Pixel draw calls. The release marker was withheld.
-3. The full-aperture plane was replaced by an open additive octagonal rim on desktop; Pixel keeps the existing open gate frame without an extra flash pass. Desktop composer/base scales were tuned to `0.25 / 0.34`; bloom strengths, gameplay, persistence, inputs, schemas, and acceptance thresholds remain unchanged.
-4. The final implementation was recaptured at identical viewports. The normalized comparison now uses the center-lane 247 m state. It and both contact sheets show an open route, readable obstacles/crystals, full ship silhouettes, and no HUD or viewport clipping.
+3. The full-aperture plane was replaced by an open additive octagonal rim on desktop; Pixel keeps the existing open gate frame without an extra flash pass. The first bounded desktop path used composer/base scales of `0.25 / 0.34`.
+4. Whole-branch review found visible whole-frame upscaling in that desktop path and an unstable full-serial near-gate slow-frame streak. The release marker was withheld while full-resolution and MSAA variants were measured and rejected for sustained slow frames.
+5. The final desktop architecture reconstructs the background from a `0.50` PBR target, renders gate/ribs/ship/entities as a full-resolution lightweight detail layer, and composites selective `0.20` bloom every second frame. This replaces low-resolution critical draws rather than duplicating them. Pixel rendering, bloom presets, gameplay, persistence, inputs, schemas, and all acceptance thresholds remain unchanged.
+6. The exact final implementation was recaptured at identical viewports. The normalized comparison uses the center-lane 247 m state. It and both contact sheets show normal one-pixel edge antialiasing without whole-frame block upscaling, an open route, readable obstacles/crystals, full ship silhouettes, and no HUD or viewport clipping.
 
 ## Required fidelity surfaces
 
 - Fonts and typography: the condensed display treatment, small uppercase HUD labels, tabular numbers, separated distance unit, and menu hierarchy remain legible at desktop and Pixel 7 sizes. The procedural build does not reproduce the source's exact custom arcade typeface; this is P3.
 - Spacing and layout: score/multiplier stay top-left, distance/gate top-right, energy bottom-center, and pause bottom-right. The playfield center and ship remain unobstructed; no horizontal overflow is present.
 - Colors and tokens: cyan navigation, magenta accent, deep navy surfaces, restrained translucent HUD backing, and emissive hierarchy match the approved direction. The near-pass frame remains bright, open, and readable without a full-aperture transmission pass.
-- Image and asset quality: the source is a cinematic raster concept; the implementation is intentionally procedural Three.js with no runtime image or model assets. Ship, tunnel, gates, obstacles, and crystals are real rendered geometry. Residual micro-surface density, reflections, and volumetric scattering are P3.
+- Image and asset quality: the source is a cinematic raster concept; the implementation is intentionally procedural Three.js with no runtime image or model assets. Ship, tunnel, gates, obstacles, and crystals are real rendered geometry. Critical desktop silhouettes are rasterized at the full `1536 × 1024` output resolution. Flatter detail-layer lighting, residual micro-surface density, reflections, and volumetric scattering are P3.
 - Copy and content: all visible text is game-specific, concise, and contains no Hanzi-learning content.
 - Icons and controls: the pause glyph is consistent across desktop/mobile; all primary controls remain visible, keyboard reachable, and at least 44 px.
 
@@ -36,17 +38,17 @@
 
 | Profile/state | Samples | Median | Worst | Slow frames | Longest streak | Draw calls | Geometries | Textures | Input latency |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Desktop normal | 67 | 49.9 ms | 58.4 ms | 12 | 2 | 49 | 13 | 15 | 1.0 ms |
-| Desktop near gate, 247 m | 65 | 50.0 ms | 66.7 ms | 14 | 3 | 51 | 15 | 16 | 0.8 ms |
-| Pixel 7 normal | 94 | 33.3 ms | 41.7 ms | 0 | 0 | 43 | 13 | 14 | 0.9 ms |
-| Pixel 7 near gate, 247 m | 83 | 40.8 ms | 83.3 ms | 1 | 1 | 44 | 14 | 15 | 0.9 ms |
+| Desktop normal | 69 | 41.8 ms | 93.2 ms | 6 | 1 | 49 | 13 | 15 | 0.8 ms |
+| Desktop near gate, 247 m | 62 | 50.0 ms | 75.0 ms | 20 | 2 | 51 | 15 | 16 | 0.6 ms |
+| Pixel 7 normal | 102 | 33.3 ms | 250.0 ms | 1 | 1 | 43 | 13 | 14 | 0.7 ms |
+| Pixel 7 near gate, 247 m | 88 | 33.4 ms | 41.8 ms | 0 | 0 | 44 | 14 | 15 | 0.6 ms |
 
 - `npm ci`: 0 vulnerabilities.
-- Unit tests: 139/139 passed.
+- Unit tests: 142/142 passed.
 - Browser tests: 30/30 passed serially across desktop Chromium and Pixel 7 emulation.
-- Production build: passed; `dist` is 4,700 KiB and uses relative `/neon-glider/` assets.
+- Production build: passed; `dist` is 4,704 KiB and uses relative `/neon-glider/` assets.
 - P0: none. P1: none. P2: none.
-- P3: the procedural scene remains less photorealistic than the source in micro-surface detail, reflection density, and volumetric scattering.
+- P3: the procedural scene remains flatter and less photorealistic than the source in material lighting, micro-surface detail, reflection density, and volumetric scattering.
 - The full-resolution same-state comparison directly covers the gate aperture, label, ship silhouette, and entity contours; no separate crop is required.
 
 final result: passed

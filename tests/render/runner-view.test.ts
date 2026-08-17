@@ -139,6 +139,68 @@ it.each([
   view.dispose();
 });
 
+it('moves desktop gameplay silhouettes to the full-resolution detail layer', () => {
+  const renderer = rendererFixture();
+  let scene: THREE.Scene | undefined;
+  let detailLayer: number | undefined;
+  const view = createRunnerView(containerFixture(1_536, 1_024), {
+    ...fixtureOptions(renderer),
+    forceQuality: 'desktop',
+    createPostFx: (target, createdScene, camera, options) => {
+      scene = createdScene;
+      detailLayer = options.detailLayer;
+      return { render: () => target.render(createdScene, camera), setSize: vi.fn(), dispose: vi.fn() };
+    },
+  });
+
+  expect(detailLayer).toBe(2);
+  for (const name of [
+    'cyan-ribs',
+    'magenta-ribs',
+    'floor-seam-instances',
+    'panel-detail-instances',
+    'active-gate-frame',
+    'active-gate-accent',
+    'gate-number',
+  ]) {
+    const object = scene?.getObjectByName(name);
+    expect(object?.layers.isEnabled(2), name).toBe(true);
+    expect(object?.layers.isEnabled(0), name).toBe(false);
+  }
+  for (const rootName of ['neon-ship', 'entity-field']) {
+    scene?.getObjectByName(rootName)?.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        expect(object.layers.isEnabled(2), object.name).toBe(true);
+        expect(object.layers.isEnabled(0), object.name).toBe(false);
+      }
+    });
+  }
+  expect(scene?.getObjectByName('speed-streaks')?.layers.isEnabled(0)).toBe(true);
+  expect(scene?.getObjectByName('speed-streaks')?.layers.isEnabled(2)).toBe(false);
+  view.dispose();
+});
+
+it('keeps every split scene layer visible when post-processing construction falls back', () => {
+  const renderer = rendererFixture();
+  const renderedLayerMasks: number[] = [];
+  (renderer.render as ReturnType<typeof vi.fn>).mockImplementation((_scene, camera: THREE.Camera) => {
+    renderedLayerMasks.push(camera.layers.mask);
+  });
+  const view = createRunnerView(containerFixture(1_536, 1_024), {
+    ...fixtureOptions(renderer),
+    forceQuality: 'desktop',
+    createPostFx: () => { throw new Error('unsupported post-processing'); },
+  });
+
+  view.setSnapshot(createRunner(2));
+  view.render(1);
+
+  expect(renderedLayerMasks).toEqual([-1]);
+  const renderedCamera = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][1] as THREE.Camera;
+  expect(renderedCamera.layers.mask).toBe(1);
+  view.dispose();
+});
+
 it.each([
   [1536, 1024, 'desktop' as const],
   [412, 915, 'mobile' as const],
@@ -227,7 +289,12 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
           createPostFx: (renderer, scene, camera) => {
             renderedScene = scene;
             return {
-              render: () => renderer.render(scene, camera),
+              render: () => {
+                const originalLayerMask = camera.layers.mask;
+                camera.layers.enableAll();
+                renderer.render(scene, camera);
+                camera.layers.mask = originalLayerMask;
+              },
               setSize: () => undefined,
               dispose: () => undefined,
             };
@@ -294,7 +361,7 @@ it('uses the release render scale by responsive quality and resizes the camera a
         return { observe: vi.fn(), disconnect: vi.fn() };
       },
     });
-    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(2);
+    expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1);
     setContainerSize(desktopContainer, 412, 915);
     resizeDesktop?.([], {} as ResizeObserver);
     expect(desktopRenderer.setPixelRatio).toHaveBeenLastCalledWith(1.35);

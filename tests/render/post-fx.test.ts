@@ -58,15 +58,27 @@ it('uses bloom when composer creation succeeds and direct rendering when it fail
 });
 
 it('falls back permanently when a composed frame fails', () => {
-  const renderer = rendererFixture();
+  const renderer = rendererFixture() as RendererLike & {
+    autoClear: boolean;
+    setRenderTarget: ReturnType<typeof vi.fn>;
+  };
+  renderer.autoClear = true;
+  renderer.setRenderTarget = vi.fn();
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera();
+  const renderedLayerMasks: number[] = [];
+  (renderer.render as ReturnType<typeof vi.fn>).mockImplementation((renderedScene, renderedCamera) => {
+    if (renderedScene === scene && renderedCamera === camera) renderedLayerMasks.push(camera.layers.mask);
+  });
   const fixture = composerFixture();
   (fixture.composer.render as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
     throw new Error('context capability changed');
   });
   const fx = createPostFx(renderer, scene, camera, {
     enabled: true,
+    quality: 'desktop',
+    bloomLayer: 1,
+    detailLayer: 2,
     width: 640,
     height: 360,
     createComposer: () => fixture.composer,
@@ -78,6 +90,8 @@ it('falls back permanently when a composed frame fails', () => {
   expect(fixture.composer.render).toHaveBeenCalledOnce();
   expect(fixture.composer.dispose).toHaveBeenCalledOnce();
   expect(renderer.render).toHaveBeenCalledTimes(2);
+  expect(renderedLayerMasks).toEqual([-1, -1]);
+  expect(camera.layers.mask).toBe(1);
   fx.dispose();
 });
 
@@ -120,14 +134,87 @@ it('uses the approved desktop Unreal bloom with scaled bloom buffers', () => {
     },
   });
 
-  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(384, 256);
+  expect(fixture.composer.setSize).toHaveBeenLastCalledWith(307, 205);
   expect(target?.texture.type).toBe(THREE.UnsignedByteType);
   const glow = fixture.passes[1] as import('three/examples/jsm/postprocessing/UnrealBloomPass.js').UnrealBloomPass;
   expect(glow.strength).toBe(0.44);
   expect(glow.radius).toBe(0.34);
   expect(glow.threshold).toBe(0.58);
-  expect(glow.renderTargetBright).toMatchObject({ width: 154, height: 103 });
+  expect(glow.renderTargetBright).toMatchObject({ width: 123, height: 82 });
   fx.dispose();
+});
+
+it('reconstructs the bounded desktop base through an edge-adaptive viewport pass', () => {
+  const renderer = rendererFixture() as RendererLike & {
+    autoClear: boolean;
+    setRenderTarget: ReturnType<typeof vi.fn>;
+  };
+  renderer.autoClear = true;
+  renderer.setRenderTarget = vi.fn();
+  const fixture = composerFixture();
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x123456);
+  const originalDetailMaterial = new THREE.MeshStandardMaterial({
+    color: 0x244466,
+    emissive: 0x00cfff,
+    emissiveIntensity: 1.3,
+  });
+  const detailMesh = new THREE.Mesh(new THREE.BoxGeometry(), originalDetailMaterial);
+  detailMesh.layers.set(2);
+  scene.add(detailMesh);
+  const camera = new THREE.PerspectiveCamera();
+  const scenePasses: Array<{ layerMask: number; background: THREE.Scene['background']; autoClear: boolean }> = [];
+  let renderedDetailMaterial: THREE.Material | undefined;
+  (renderer.render as ReturnType<typeof vi.fn>).mockImplementation((renderedScene, renderedCamera) => {
+    if (renderedScene === scene && renderedCamera === camera) {
+      scenePasses.push({ layerMask: camera.layers.mask, background: scene.background, autoClear: renderer.autoClear });
+      if (camera.layers.mask === 4) renderedDetailMaterial = detailMesh.material;
+    }
+  });
+  const fx = createPostFx(renderer, scene, camera, {
+    enabled: true,
+    quality: 'desktop',
+    bloomLayer: 1,
+    detailLayer: 2,
+    width: 1_536,
+    height: 1_024,
+    createComposer: () => fixture.composer,
+  });
+
+  fx.render();
+  fx.render();
+  fx.render();
+
+  const baseTarget = renderer.setRenderTarget.mock.calls.find(([target]) => target !== null)?.[0] as
+    | THREE.WebGLRenderTarget
+    | undefined;
+  const reconstructionCall = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.find(([object]) => (
+    object instanceof THREE.Mesh && object.material instanceof THREE.ShaderMaterial
+  ));
+  const reconstruction = reconstructionCall?.[0] as THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | undefined;
+  expect(baseTarget).toMatchObject({ width: 768, height: 512, samples: 0 });
+  expect(reconstruction).toBeTruthy();
+  expect(reconstruction?.material.uniforms.inputTexel.value).toMatchObject({ x: 1 / 768, y: 1 / 512 });
+  expect(fixture.composer.render).toHaveBeenCalledTimes(2);
+  expect(scenePasses).toEqual([
+    { layerMask: 1, background: scene.background, autoClear: true },
+    { layerMask: 4, background: null, autoClear: false },
+    { layerMask: 1, background: scene.background, autoClear: true },
+    { layerMask: 4, background: null, autoClear: false },
+    { layerMask: 1, background: scene.background, autoClear: true },
+    { layerMask: 4, background: null, autoClear: false },
+  ]);
+  expect(camera.layers.mask).toBe(1);
+  expect(scene.background).toBeInstanceOf(THREE.Color);
+  expect(renderer.autoClear).toBe(true);
+  expect(renderedDetailMaterial).toBeInstanceOf(THREE.MeshBasicMaterial);
+  expect(renderedDetailMaterial).not.toBe(originalDetailMaterial);
+  expect(detailMesh.material).toBe(originalDetailMaterial);
+  const detailProxyDispose = vi.spyOn(renderedDetailMaterial!, 'dispose');
+  fx.dispose();
+  expect(detailProxyDispose).toHaveBeenCalledOnce();
+  detailMesh.geometry.dispose();
+  originalDetailMaterial.dispose();
 });
 
 it('renders directly when bloom is disabled', () => {
