@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createRng } from '../../src/simulation/rng';
-import { generateSegment } from '../../src/simulation/track-generator';
+import { generateRunnerSegment, generateSegment, runnerRngStateAt } from '../../src/simulation/track-generator';
 import type { Lane } from '../../src/simulation/runner-types';
 
 it('is deterministic and leaves at least one lane open', () => {
@@ -55,8 +55,29 @@ it('consumes a fixed RNG budget and emits collision-free IDs across long runs', 
   }
 });
 
-it('rejects numeric inputs that could make serialized positions ambiguous', () => {
+it('derives a random-access runner corridor without replaying earlier segments', () => {
+  const seed = 91;
+  const segment = 10_000_000;
+  const previous = generateRunnerSegment(seed, segment - 1);
+  const generated = generateRunnerSegment(seed, segment);
+
+  expect(generated).toEqual(generateRunnerSegment(seed, segment));
+  expect(generated.rngState).toBe(runnerRngStateAt(seed, segment + 1));
+  expect(generated.reachableLanes.some((lane) => previous.reachableLanes.includes(lane))).toBe(true);
+  expect(generated.entities.every((entity) => entity.segment === segment)).toBe(true);
+});
+
+it('retains tiered two-obstacle runner segments while keeping the shared corridor open', () => {
+  const generated = Array.from({ length: 100 }, (_, seed) => generateRunnerSegment(seed, 100, 2))
+    .find((segment) => segment.entities.filter((entity) => entity.kind !== 'crystal').length === 2);
+
+  expect(generated).toBeDefined();
+  expect(generated?.reachableLanes).toContain(1);
+});
+
+it('rejects invalid numeric inputs without imposing a run-distance cap', () => {
   expect(() => generateSegment(Number.NaN, 0, 0)).toThrow(RangeError);
   expect(() => generateSegment(1, -1, 0)).toThrow(RangeError);
-  expect(() => generateSegment(1, Math.floor((Number.MAX_SAFE_INTEGER - 80) / 20) + 1, 0)).toThrow(RangeError);
+  expect(() => generateSegment(1, Math.floor((Number.MAX_SAFE_INTEGER - 80) / 20) + 1, 0)).not.toThrow();
+  expect(() => generateSegment(1, Number.MAX_SAFE_INTEGER + 1, 0)).toThrow(RangeError);
 });

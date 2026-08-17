@@ -1,4 +1,4 @@
-import { generateSegment } from './track-generator';
+import { generateRunnerSegment, runnerRngStateAt } from './track-generator';
 import type { Lane, RunnerState, TrackEntity } from './runner-types';
 
 export const GAME_VERSION = 'neon-glider-2026-08-17' as const;
@@ -24,19 +24,21 @@ function assertFinite(value: number, name: string): void {
   if (!Number.isFinite(value)) throw new RangeError(`${name} must be finite`);
 }
 
+function segmentTier(segment: number): number {
+  return Math.floor(Math.max(0, 80 + segment * SEGMENT_LENGTH - LOOKAHEAD_DISTANCE) / GATE_DISTANCE);
+}
+
 function fillLookahead(run: RunnerState): Pick<RunnerState, 'rngState' | 'segmentCursor' | 'entities' | 'reachableLanes'> {
-  let rngState = run.rngState;
   let segmentCursor = run.segmentCursor;
   let reachableLanes = run.reachableLanes;
   const entities = [...run.entities];
   while (80 + segmentCursor * SEGMENT_LENGTH <= run.distance + LOOKAHEAD_DISTANCE) {
-    const generated = generateSegment(rngState, segmentCursor, run.gates, reachableLanes);
-    rngState = generated.rngState;
+    const generated = generateRunnerSegment(run.seed, segmentCursor, segmentTier(segmentCursor));
     segmentCursor += 1;
     entities.push(...generated.entities);
     reachableLanes = generated.reachableLanes;
   }
-  return { rngState, segmentCursor, entities, reachableLanes };
+  return { rngState: runnerRngStateAt(run.seed, segmentCursor), segmentCursor, entities, reachableLanes };
 }
 
 export function createRunner(seed: number, reducedMotion = false): RunnerState {

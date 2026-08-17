@@ -1,5 +1,5 @@
 import { GATE_DISTANCE, GAME_VERSION, LOOKAHEAD_DISTANCE, MAX_SPEED, SEGMENT_LENGTH, START_SPEED } from '../simulation/runner';
-import { generateSegment } from '../simulation/track-generator';
+import { generateRunnerSegment, runnerRngStateAt } from '../simulation/track-generator';
 import type { EndReason, Lane, RunnerState, RunStatus, TrackEntity } from '../simulation/runner-types';
 
 export const RUN_STORAGE_KEY = 'neon-glider.run.v2';
@@ -9,9 +9,6 @@ const RUNNER_KEYS = [
   'distance', 'speed', 'energy', 'score', 'multiplier', 'gates', 'crystals', 'segmentCursor', 'reachableLanes', 'entities',
 ] as const;
 const ENTITY_KEYS = ['id', 'kind', 'lane', 'distance', 'segment'] as const;
-const INITIAL_REACHABLE_LANES: readonly Lane[] = [0, 1, 2];
-// Bounds synchronous persisted-state validation to about 20 km of a standard 20 m segment track.
-const MAX_PERSISTED_SEGMENTS = 1024;
 
 type UnavailableHandler = () => void;
 
@@ -56,19 +53,19 @@ function isEndReason(value: unknown): value is EndReason {
   return value === null || value === 'collision' || value === 'depleted';
 }
 
-function reconstructTrack(seed: number, segmentCursor: number): Pick<RunnerState, 'rngState' | 'reachableLanes' | 'entities'> {
-  let rngState = seed;
-  let reachableLanes = [...INITIAL_REACHABLE_LANES];
+function reconstructTrack(seed: number, distance: number, segmentCursor: number): Pick<RunnerState, 'rngState' | 'reachableLanes' | 'entities'> {
+  const firstPendingSegment = Math.max(0, Math.floor((distance - 80) / SEGMENT_LENGTH) + 1);
   const entities: TrackEntity[] = [];
-  for (let segment = 0; segment < segmentCursor; segment += 1) {
-    const distance = 80 + segment * SEGMENT_LENGTH;
-    const tier = Math.floor(Math.max(0, distance - LOOKAHEAD_DISTANCE) / GATE_DISTANCE);
-    const generated = generateSegment(rngState, segment, tier, reachableLanes);
-    rngState = generated.rngState;
-    reachableLanes = generated.reachableLanes;
+  for (let segment = firstPendingSegment; segment < segmentCursor; segment += 1) {
+    const generated = generateRunnerSegment(seed, segment, segmentTier(segment));
     entities.push(...generated.entities);
   }
-  return { rngState, reachableLanes, entities };
+  const lastGenerated = generateRunnerSegment(seed, segmentCursor - 1, segmentTier(segmentCursor - 1));
+  return { rngState: runnerRngStateAt(seed, segmentCursor), reachableLanes: lastGenerated.reachableLanes, entities };
+}
+
+function segmentTier(segment: number): number {
+  return Math.floor(Math.max(0, 80 + segment * SEGMENT_LENGTH - LOOKAHEAD_DISTANCE) / GATE_DISTANCE);
 }
 
 function hasExactEntity(value: unknown, expected: TrackEntity): boolean {
@@ -94,9 +91,7 @@ function expectedSegmentCursor(distance: number): number {
 
 function hasBoundedCursor(status: RunStatus, distance: number, segmentCursor: number): boolean {
   const expected = expectedSegmentCursor(distance);
-  if (!Number.isSafeInteger(expected) || expected > MAX_PERSISTED_SEGMENTS || segmentCursor > MAX_PERSISTED_SEGMENTS) {
-    return false;
-  }
+  if (!Number.isSafeInteger(expected)) return false;
   return status === 'complete'
     ? segmentCursor === expected || segmentCursor === expected - 1
     : segmentCursor === expected;
@@ -136,11 +131,10 @@ export function isRunnerState(value: unknown): value is RunnerState {
     return false;
   }
 
-  const expected = reconstructTrack(seed, segmentCursor);
-  const pendingEntities = expected.entities.filter((entity) => entity.distance > distance);
+  const expected = reconstructTrack(seed, distance, segmentCursor);
   return value.rngState === expected.rngState
     && sameLanes(value.reachableLanes, expected.reachableLanes)
-    && sameEntities(value.entities, pendingEntities);
+    && sameEntities(value.entities, expected.entities);
 }
 
 export function saveRunner(storage: Storage, run: RunnerState, onUnavailable: UnavailableHandler = () => undefined): boolean {

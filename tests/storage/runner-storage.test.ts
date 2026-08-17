@@ -63,7 +63,7 @@ it('rejects states whose random continuation or entities are inconsistent', () =
 it('accepts a legitimate long progressed state after crossed entities are removed', () => {
   let run = createRunner(1);
 
-  for (let tick = 0; tick < 600; tick += 1) {
+  for (let tick = 0; tick < 2_500 && run.distance < 25_000; tick += 1) {
     const nextObstacleDistance = Math.min(...run.entities.filter((entity) => entity.kind !== 'crystal').map((entity) => entity.distance));
     const blockedLanes = run.entities
       .filter((entity) => entity.kind !== 'crystal' && entity.distance === nextObstacleDistance)
@@ -75,25 +75,25 @@ it('accepts a legitimate long progressed state after crossed entities are remove
   }
 
   expect(run).toMatchObject({ status: 'playing' });
-  expect(run.distance).toBeGreaterThan(5_900);
+  expect(run.distance).toBeGreaterThan(25_000);
   expect(run.entities.some((entity) => entity.distance <= run.distance)).toBe(false);
-  expect(isRunnerState(run)).toBe(true);
+  const generateRunnerSegment = vi.spyOn(trackGenerator, 'generateRunnerSegment');
+  try {
+    expect(isRunnerState(run)).toBe(true);
+    expect(generateRunnerSegment).toHaveBeenCalledTimes(new Set(run.entities.map((entity) => entity.segment)).size + 1);
+  } finally {
+    generateRunnerSegment.mockRestore();
+  }
 });
 
-it('rejects impossible and oversized cursors before reconstructing generated segments', () => {
+it('rejects impossible cursors before reconstructing generated segments', () => {
   const run = createRunner(1);
-  const generateSegment = vi.spyOn(trackGenerator, 'generateSegment');
+  const generateRunnerSegment = vi.spyOn(trackGenerator, 'generateRunnerSegment');
   try {
     expect(isRunnerState({ ...run, segmentCursor: run.segmentCursor + 1 })).toBe(false);
-    expect(isRunnerState({
-      ...run,
-      distance: 199_480,
-      gates: Math.floor(199_480 / 250),
-      segmentCursor: 10_000,
-    })).toBe(false);
-    expect(generateSegment).not.toHaveBeenCalled();
+    expect(generateRunnerSegment).not.toHaveBeenCalled();
   } finally {
-    generateSegment.mockRestore();
+    generateRunnerSegment.mockRestore();
   }
 });
 
