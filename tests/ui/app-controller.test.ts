@@ -76,6 +76,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
   window.history.replaceState(null, '', '/');
 });
@@ -239,6 +240,111 @@ describe('runner lifecycle', () => {
     app.destroy();
   });
 
+  it('keeps a manually paused run blocked until a lost context is restored', () => {
+    vi.useFakeTimers();
+    let options: Parameters<NonNullable<AppControllerDependencies['createRunnerView']>>[1];
+    const app = createAppController(root, dependencies({
+      createRunnerView: (_container, nextOptions) => {
+        options = nextOptions;
+        return runnerView();
+      },
+    }));
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')!.click();
+    vi.advanceTimersByTime(3_000);
+    app.root.querySelector<HTMLButtonElement>('[data-action="pause"]')!.click();
+
+    options!.onContextLost?.();
+    app.root.querySelector<HTMLButtonElement>('[data-action="resume"]')!.click();
+    vi.advanceTimersByTime(5_000);
+    expect(app.getState().screen).toBe('paused');
+
+    options!.onContextRestored?.();
+    expect(app.getState().screen).toBe('countdown');
+    vi.advanceTimersByTime(2_999);
+    expect(app.getState().screen).toBe('countdown');
+    vi.advanceTimersByTime(1);
+    expect(app.getState().screen).toBe('playing');
+    app.destroy();
+  });
+
+  it('waits for context restoration when visibility loss happens first', () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    let options: Parameters<NonNullable<AppControllerDependencies['createRunnerView']>>[1];
+    const app = createAppController(root, dependencies({
+      createRunnerView: (_container, nextOptions) => {
+        options = nextOptions;
+        return runnerView();
+      },
+    }));
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')!.click();
+    vi.advanceTimersByTime(3_000);
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    options!.onContextLost?.();
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(5_000);
+    expect(app.getState().screen).toBe('paused');
+
+    options!.onContextRestored?.();
+    expect(app.getState().screen).toBe('countdown');
+    vi.advanceTimersByTime(3_000);
+    expect(app.getState().screen).toBe('playing');
+    app.destroy();
+  });
+
+  it('waits for visibility when context loss happens first', () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    let options: Parameters<NonNullable<AppControllerDependencies['createRunnerView']>>[1];
+    const app = createAppController(root, dependencies({
+      createRunnerView: (_container, nextOptions) => {
+        options = nextOptions;
+        return runnerView();
+      },
+    }));
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')!.click();
+    vi.advanceTimersByTime(3_000);
+
+    options!.onContextLost?.();
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    options!.onContextRestored?.();
+    vi.advanceTimersByTime(5_000);
+    expect(app.getState().screen).toBe('paused');
+
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(app.getState().screen).toBe('countdown');
+    vi.advanceTimersByTime(3_000);
+    expect(app.getState().screen).toBe('playing');
+    app.destroy();
+  });
+
+  it('makes the background game UI inert only while the pause dialog is modal', () => {
+    const app = createAppController(root, dependencies());
+    start(app);
+    const playfield = root.querySelector<HTMLElement>('[data-game-viewport]')!;
+    const pause = root.querySelector<HTMLButtonElement>('[data-action="pause"]')!;
+
+    pause.click();
+    expect(playfield.inert).toBe(true);
+    expect(playfield.getAttribute('aria-hidden')).toBe('true');
+    expect(pause.inert).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-screen="paused"]')!.hasAttribute('inert')).toBe(false);
+
+    root.querySelector<HTMLButtonElement>('[data-action="resume"]')!.click();
+    expect(app.getState().screen).toBe('countdown');
+    expect(playfield.inert).toBe(false);
+    expect(playfield.hasAttribute('aria-hidden')).toBe(false);
+    expect(pause.inert).toBe(false);
+    app.destroy();
+  });
+
   it('records a completed run exactly once and clears the active checkpoint', () => {
     const saveProfile = vi.fn(() => true);
     const clearRunner = vi.fn();
@@ -279,5 +385,32 @@ describe('test API', () => {
     const queried = createAppController(root, dependencies({ enableTestApi: undefined }));
     expect(queried.test).toBeDefined();
     queried.destroy();
+  });
+});
+
+describe('motion preference', () => {
+  it('mirrors the persisted in-app reduced-motion preference onto the app root', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false } as MediaQueryList)));
+    const profile = { ...createDefaultProfile(), reducedMotion: true };
+    const app = createAppController(root, dependencies({ loadProfile: () => profile }));
+
+    expect(root.dataset.reducedMotion).toBe('true');
+    expect(root.classList.contains('is-reduced-motion')).toBe(true);
+    app.destroy();
+  });
+
+  it('updates the DOM reduced-motion state from the menu toggle without an OS preference', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false } as MediaQueryList)));
+    const saveProfile = vi.fn(() => true);
+    const app = createAppController(root, dependencies({ saveProfile }));
+    const toggle = root.querySelector<HTMLInputElement>('[data-reduced-motion]')!;
+
+    expect(root.dataset.reducedMotion).toBe('false');
+    toggle.click();
+
+    expect(root.dataset.reducedMotion).toBe('true');
+    expect(root.classList.contains('is-reduced-motion')).toBe(true);
+    expect(saveProfile).toHaveBeenLastCalledWith(expect.objectContaining({ reducedMotion: true }), expect.any(Function));
+    app.destroy();
   });
 });

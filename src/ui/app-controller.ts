@@ -184,6 +184,7 @@ export function createAppController(
   let completionRecorded = false;
   let visibilitySuspended = false;
   let contextSuspended = false;
+  let resumeRequested = false;
   let destroyed = false;
   const frameClock = new FrameClock();
 
@@ -216,6 +217,20 @@ export function createAppController(
     view?.dispose();
     view = null;
     gameScreen = null;
+    visibilitySuspended = false;
+    contextSuspended = false;
+    resumeRequested = false;
+  };
+
+  const setDomReducedMotion = (enabled: boolean) => {
+    root.dataset.reducedMotion = String(enabled);
+    root.classList.toggle('is-reduced-motion', enabled);
+  };
+
+  const syncMenuReducedMotion = () => {
+    const enabled = reducedMotionPreference(profile);
+    setDomReducedMotion(enabled);
+    return enabled;
   };
 
   const showFatal = () => {
@@ -232,11 +247,13 @@ export function createAppController(
     run = null;
     screen = 'menu';
     completionRecorded = false;
+    syncMenuReducedMotion();
     const menu = createMenuScreen({
       profile,
       onStart: () => startNewRun(),
       onReducedMotion: (enabled) => {
         profile = { ...profile, reducedMotion: enabled };
+        syncMenuReducedMotion();
         if (!saveProfile(profile, showStorageWarning)) showStorageWarning();
       },
     });
@@ -315,9 +332,10 @@ export function createAppController(
     renderMenu();
   };
 
-  const pauseRun = (message = 'Lượt chơi đang tạm dừng.') => {
+  const pauseRun = (message = 'Lượt chơi đang tạm dừng.', wantsResume = false) => {
     if (!run || !gameScreen || (screen !== 'playing' && screen !== 'countdown' && screen !== 'paused')) return;
     clearCountdown();
+    resumeRequested = wantsResume;
     run = { ...run, status: 'paused', endReason: null };
     screen = 'paused';
     frameClock.reset();
@@ -325,24 +343,26 @@ export function createAppController(
     view?.setPaused(true);
     saveCheckpoint();
     gameScreen.update(run);
+    gameScreen.setModal(true);
     gameScreen.overlay.replaceChildren(createPauseOverlay(message, () => {
-      if (document.visibilityState === 'hidden') {
-        visibilitySuspended = true;
-        return;
-      }
-      startCountdown();
+      resumeRequested = true;
+      resumeWhenReady();
     }, abandonRun));
   };
 
-  const startCountdown = () => {
+  function startCountdown() {
     if (!run || !gameScreen || !view || destroyed) return;
+    if (document.visibilityState === 'hidden' || contextSuspended) return;
     clearCountdown();
+    resumeRequested = false;
+    visibilitySuspended = false;
     run = { ...run, status: 'paused', endReason: null };
     screen = 'countdown';
     frameClock.reset();
     view.setSnapshot(run);
     view.setPaused(true);
     gameScreen.update(run);
+    gameScreen.setModal(false);
     let value = 3;
     gameScreen.overlay.replaceChildren(createCountdownOverlay(value));
     saveCheckpoint();
@@ -367,31 +387,38 @@ export function createAppController(
       saveCheckpoint();
       gameScreen.viewport.focus({ preventScroll: true });
     }, 1_000);
-  };
+  }
+
+  function resumeWhenReady() {
+    if (!resumeRequested || !run || !gameScreen || !view || destroyed) return;
+    if (document.visibilityState === 'hidden') {
+      visibilitySuspended = true;
+      return;
+    }
+    if (contextSuspended) return;
+    startCountdown();
+  }
 
   const prepareGameplay = () => {
     if (!run) return false;
     stopGameplay();
     const nextScreen = createGameScreen(() => pauseRun());
     gameScreen = nextScreen;
+    setDomReducedMotion(run.reducedMotion);
     root.replaceChildren(nextScreen.element);
     appendStorageWarning();
     try {
       view = createRunnerView(nextScreen.viewport, {
         reducedMotion: run.reducedMotion,
         onContextLost: () => {
-          if (screen !== 'playing' && screen !== 'countdown') return;
+          if (!view || !run || !gameScreen) return;
           contextSuspended = true;
-          pauseRun('Kết nối đồ họa bị gián đoạn.');
+          pauseRun('Kết nối đồ họa bị gián đoạn.', screen === 'playing' || screen === 'countdown' || resumeRequested);
         },
         onContextRestored: () => {
           if (!contextSuspended || !run || !gameScreen || !view) return;
           contextSuspended = false;
-          if (document.visibilityState === 'hidden') {
-            visibilitySuspended = true;
-            return;
-          }
-          startCountdown();
+          resumeWhenReady();
         },
       });
     } catch {
@@ -413,15 +440,14 @@ export function createAppController(
 
   function startNewRun() {
     completionRecorded = false;
-    visibilitySuspended = false;
-    contextSuspended = false;
     run = { ...createRunner(createSeed(), reducedMotionPreference(profile)), status: 'paused' };
     if (!prepareGameplay()) return;
+    resumeRequested = true;
     if (document.visibilityState === 'hidden') {
       visibilitySuspended = true;
-      pauseRun();
+      pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
     } else {
-      startCountdown();
+      resumeWhenReady();
     }
   }
 
@@ -430,11 +456,12 @@ export function createAppController(
     run = { ...restored, status: 'paused', endReason: null };
     if (!prepareGameplay()) return;
     saveCheckpoint();
+    resumeRequested = true;
     if (document.visibilityState === 'hidden') {
       visibilitySuspended = true;
-      pauseRun();
+      pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
     } else {
-      startCountdown();
+      resumeWhenReady();
     }
   };
 
@@ -442,18 +469,16 @@ export function createAppController(
     if (document.visibilityState === 'hidden') {
       if (run && (screen === 'playing' || screen === 'countdown')) {
         visibilitySuspended = true;
-        pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.');
+        pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
       }
       return;
     }
-    if (visibilitySuspended && run && gameScreen && view) {
-      visibilitySuspended = false;
-      startCountdown();
-    }
+    if (visibilitySuspended || resumeRequested) resumeWhenReady();
   };
   document.addEventListener('visibilitychange', onVisibilityChange);
 
   profile = loadProfile(showStorageWarning);
+  syncMenuReducedMotion();
   const restored = loadRunner(showStorageWarning);
   if (restored?.status === 'complete') {
     clearRunner(showStorageWarning);

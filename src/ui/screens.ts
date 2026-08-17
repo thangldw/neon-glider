@@ -67,6 +67,7 @@ export interface GameScreen {
   element: HTMLElement;
   viewport: HTMLElement;
   overlay: HTMLElement;
+  setModal(active: boolean): void;
   update(run: RunnerState): void;
   announceLane(lane: 0 | 1 | 2): void;
 }
@@ -126,6 +127,15 @@ export function createGameScreen(onPause: () => void): GameScreen {
     element: screen,
     viewport,
     overlay,
+    setModal(active) {
+      overlay.removeAttribute('aria-hidden');
+      for (const child of Array.from(screen.children)) {
+        if (child === overlay || !(child instanceof HTMLElement)) continue;
+        child.inert = active;
+        if (active) child.setAttribute('aria-hidden', 'true');
+        else child.removeAttribute('aria-hidden');
+      }
+    },
     update(run) {
       score.value.textContent = formatInteger(run.score);
       multiplier.value.textContent = `×${run.multiplier.toFixed(1)}`;
@@ -186,6 +196,8 @@ export function createResultScreen(options: {
   const screen = element('section', 'result-screen');
   screen.dataset.screen = 'result';
   screen.tabIndex = -1;
+  screen.setAttribute('role', 'dialog');
+  screen.setAttribute('aria-modal', 'true');
   screen.setAttribute('aria-labelledby', 'result-title');
   const title = element('h1');
   title.id = 'result-title';

@@ -317,6 +317,11 @@ input:focus-visible {
   pointer-events: none;
 }
 
+.game-screen > [inert] {
+  pointer-events: none;
+  user-select: none;
+}
+
 .countdown-overlay {
   display: grid;
   place-items: center;
@@ -509,8 +514,32 @@ input:focus-visible {
   .fatal-screen h1,
   .countdown-value,
   .hud-value,
-  .energy-fill {
+  .energy-fill,
+  .primary-button,
+  .pause-button,
+  .modal-overlay {
     text-shadow: none;
     box-shadow: none;
   }
+}
+
+[data-reduced-motion="true"] *,
+[data-reduced-motion="true"] *::before,
+[data-reduced-motion="true"] *::after {
+  scroll-behavior: auto !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+[data-reduced-motion="true"] .menu-screen h1,
+[data-reduced-motion="true"] .result-screen h1,
+[data-reduced-motion="true"] .fatal-screen h1,
+[data-reduced-motion="true"] .countdown-value,
+[data-reduced-motion="true"] .hud-value,
+[data-reduced-motion="true"] .energy-fill,
+[data-reduced-motion="true"] .primary-button,
+[data-reduced-motion="true"] .pause-button,
+[data-reduced-motion="true"] .modal-overlay {
+  text-shadow: none;
+  box-shadow: none;
 }

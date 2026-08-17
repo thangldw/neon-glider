@@ -44,6 +44,8 @@ it('renders collision and depletion results without learning content', () => {
 
   expect(collision.textContent).toContain('VA CHẠM');
   expect(depletion.textContent).toContain('CẠN NĂNG LƯỢNG');
+  expect(collision.getAttribute('role')).toBe('dialog');
+  expect(collision.getAttribute('aria-modal')).toBe('true');
   expect(`${collision.textContent} ${depletion.textContent}`).not.toMatch(/HSK|chữ Hán|pinyin|từ cần xem lại/i);
 });
 
