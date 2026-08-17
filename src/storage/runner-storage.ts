@@ -1,18 +1,15 @@
-import { GAME_VERSION, MAX_SPEED, START_SPEED } from '../simulation/runner';
-import type { EndReason, Lane, RunnerState, RunStatus, TrackEntity, TrackEntityKind } from '../simulation/runner-types';
+import { GATE_DISTANCE, GAME_VERSION, LOOKAHEAD_DISTANCE, MAX_SPEED, SEGMENT_LENGTH, START_SPEED } from '../simulation/runner';
+import { generateSegment } from '../simulation/track-generator';
+import type { EndReason, Lane, RunnerState, RunStatus, TrackEntity } from '../simulation/runner-types';
 
 export const RUN_STORAGE_KEY = 'neon-glider.run.v2';
 
-const MAX_UINT32 = 0xffff_ffff;
-const UINT32_MODULUS = 0x1_0000_0000n;
-const RNG_INCREMENT = 0x6d2b79f5n;
-const RNG_CALLS_PER_SEGMENT = 7n;
-const ENTITY_KINDS: readonly TrackEntityKind[] = ['cube', 'prism', 'wall', 'crystal'];
 const RUNNER_KEYS = [
   'schemaVersion', 'gameVersion', 'seed', 'rngState', 'status', 'endReason', 'reducedMotion', 'lane',
   'distance', 'speed', 'energy', 'score', 'multiplier', 'gates', 'crystals', 'segmentCursor', 'reachableLanes', 'entities',
 ] as const;
 const ENTITY_KEYS = ['id', 'kind', 'lane', 'distance', 'segment'] as const;
+const INITIAL_REACHABLE_LANES: readonly Lane[] = [0, 1, 2];
 
 type UnavailableHandler = () => void;
 
@@ -42,7 +39,7 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 }
 
 function isUint32(value: unknown): value is number {
-  return isNonNegativeSafeInteger(value) && value <= MAX_UINT32;
+  return isNonNegativeSafeInteger(value) && value <= 0xffff_ffff;
 }
 
 function isLane(value: unknown): value is Lane {
@@ -57,25 +54,36 @@ function isEndReason(value: unknown): value is EndReason {
   return value === null || value === 'collision' || value === 'depleted';
 }
 
-function isTrackEntity(value: unknown, distance: number, segmentCursor: number): value is TrackEntity {
-  if (!isRecord(value) || !hasExactKeys(value, ENTITY_KEYS)) return false;
-  const { id, kind, lane, segment } = value;
-  const entityDistance = value.distance;
-  if (typeof id !== 'string' || id.trim().length === 0
-    || !ENTITY_KINDS.includes(kind as TrackEntityKind) || !isLane(lane)
-    || !isFiniteNonNegative(entityDistance) || !isNonNegativeSafeInteger(segment)
-    || segment >= segmentCursor || entityDistance <= distance) {
-    return false;
+function reconstructTrack(seed: number, segmentCursor: number): Pick<RunnerState, 'rngState' | 'reachableLanes' | 'entities'> {
+  let rngState = seed;
+  let reachableLanes = [...INITIAL_REACHABLE_LANES];
+  const entities: TrackEntity[] = [];
+  for (let segment = 0; segment < segmentCursor; segment += 1) {
+    const distance = 80 + segment * SEGMENT_LENGTH;
+    const tier = Math.floor(Math.max(0, distance - LOOKAHEAD_DISTANCE) / GATE_DISTANCE);
+    const generated = generateSegment(rngState, segment, tier, reachableLanes);
+    rngState = generated.rngState;
+    reachableLanes = generated.reachableLanes;
+    entities.push(...generated.entities);
   }
-  const expectedId = kind === 'crystal'
-    ? `segment-${segment}-crystal`
-    : `segment-${segment}-obstacle-`;
-  return entityDistance === 80 + segment * 20
-    && (kind === 'crystal' ? id === expectedId : id === `${expectedId}0` || id === `${expectedId}1`);
+  return { rngState, reachableLanes, entities };
 }
 
-function expectedRngState(seed: number, segmentCursor: number): number {
-  return Number((BigInt(seed) + BigInt(segmentCursor) * RNG_CALLS_PER_SEGMENT * RNG_INCREMENT) % UINT32_MODULUS);
+function hasExactEntity(value: unknown, expected: TrackEntity): boolean {
+  return isRecord(value) && hasExactKeys(value, ENTITY_KEYS)
+    && value.id === expected.id
+    && value.kind === expected.kind
+    && value.lane === expected.lane
+    && value.distance === expected.distance
+    && value.segment === expected.segment;
+}
+
+function sameLanes(actual: unknown[], expected: readonly Lane[]): boolean {
+  return actual.length === expected.length && actual.every((lane, index) => lane === expected[index]);
+}
+
+function sameEntities(actual: unknown[], expected: readonly TrackEntity[]): boolean {
+  return actual.length === expected.length && actual.every((entity, index) => hasExactEntity(entity, expected[index]));
 }
 
 function clearInvalid(storage: Storage, onUnavailable: UnavailableHandler): void {
@@ -94,6 +102,7 @@ export function isRunnerState(value: unknown): value is RunnerState {
   const distance = value.distance;
   const segmentCursor = value.segmentCursor;
   const seed = value.seed;
+  const gates = value.gates;
 
   if (value.schemaVersion !== 2 || value.gameVersion !== GAME_VERSION
     || !isUint32(seed) || !isUint32(value.rngState)
@@ -105,16 +114,16 @@ export function isRunnerState(value: unknown): value is RunnerState {
     || typeof value.energy !== 'number' || !Number.isFinite(value.energy) || value.energy < 0 || value.energy > 100
     || !isFiniteNonNegative(value.score)
     || typeof value.multiplier !== 'number' || !Number.isFinite(value.multiplier) || value.multiplier < 1 || value.multiplier > 8
-    || !isNonNegativeSafeInteger(value.gates) || !isNonNegativeSafeInteger(value.crystals) || !isNonNegativeSafeInteger(segmentCursor)
-    || value.reachableLanes.length === 0 || value.reachableLanes.some((lane) => !isLane(lane))
-    || new Set(value.reachableLanes).size !== value.reachableLanes.length
-    || !value.entities.every((entity) => isTrackEntity(entity, distance, segmentCursor))
-    || new Set(value.entities.map((entity) => entity.id)).size !== value.entities.length
-    || value.rngState !== expectedRngState(seed, segmentCursor)) {
+    || !isNonNegativeSafeInteger(gates) || gates !== Math.floor(distance / GATE_DISTANCE)
+    || !isNonNegativeSafeInteger(value.crystals) || !isNonNegativeSafeInteger(segmentCursor)) {
     return false;
   }
 
-  return true;
+  const expected = reconstructTrack(seed, segmentCursor);
+  const pendingEntities = expected.entities.filter((entity) => entity.distance > distance);
+  return value.rngState === expected.rngState
+    && sameLanes(value.reachableLanes, expected.reachableLanes)
+    && sameEntities(value.entities, pendingEntities);
 }
 
 export function saveRunner(storage: Storage, run: RunnerState, onUnavailable: UnavailableHandler = () => undefined): boolean {
