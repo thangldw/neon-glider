@@ -21,6 +21,14 @@ const MOBILE_WIDTH = 640;
 export interface FramingDiagnostics {
   gliderNdcX: number;
   gliderNdcY: number;
+  gliderBounds: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+  };
   gliderVisible: boolean;
 }
 
@@ -183,6 +191,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
   let latestSnapshot: RunnerState | null = null;
   let graph: SceneGraph;
   const projectedPosition = new THREE.Vector3();
+  const shipBoundCorners = Array.from({ length: 8 }, () => new THREE.Vector3());
   const lookTarget = new THREE.Vector3();
 
   function dimensions(): { width: number; height: number } {
@@ -208,6 +217,8 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     scene.fog = new THREE.Fog(0x03031a, 24, quality === 'desktop' ? 176 : 132);
     const camera = new THREE.PerspectiveCamera(64, width / height, 0.1, 220);
     const materials = createNeonMaterials();
+    // Transmission triggers a full opaque-scene prepass; mobile keeps the emissive transparent crystal without it.
+    if (quality === 'mobile') materials.crystal.transmission = 0;
     let tunnel: NeonTunnel | null = null;
     let ship: NeonShip | null = null;
     let entityField: EntityField | null = null;
@@ -220,7 +231,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       streaks = createSpeedStreaks(quality, materials);
       const shipAnchor = new THREE.Group();
       shipAnchor.name = 'neon-ship-anchor';
-      shipAnchor.position.set(0, -2.25, 2.2);
+      shipAnchor.position.set(0, quality === 'mobile' ? -2.25 : -1.7, quality === 'mobile' ? 2.2 : -1);
       shipAnchor.scale.setScalar(quality === 'mobile' ? 0.55 : 0.76);
       shipAnchor.add(ship.root);
 
@@ -406,13 +417,41 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     getFramingDiagnostics() {
       graph.camera.updateMatrixWorld(true);
       graph.ship.root.getWorldPosition(projectedPosition).project(graph.camera);
+      graph.ship.root.updateWorldMatrix(true, true);
+      let minX = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      let minZ = Number.POSITIVE_INFINITY;
+      let maxZ = Number.NEGATIVE_INFINITY;
+      graph.ship.root.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+        const bounds = object.geometry.boundingBox;
+        if (!bounds) return;
+        for (let index = 0; index < shipBoundCorners.length; index += 1) {
+          const corner = shipBoundCorners[index];
+          corner.set(
+            index & 1 ? bounds.max.x : bounds.min.x,
+            index & 2 ? bounds.max.y : bounds.min.y,
+            index & 4 ? bounds.max.z : bounds.min.z,
+          ).applyMatrix4(object.matrixWorld).project(graph.camera);
+          minX = Math.min(minX, corner.x);
+          maxX = Math.max(maxX, corner.x);
+          minY = Math.min(minY, corner.y);
+          maxY = Math.max(maxY, corner.y);
+          minZ = Math.min(minZ, corner.z);
+          maxZ = Math.max(maxZ, corner.z);
+        }
+      });
+      const gliderBounds = { minX, maxX, minY, maxY, minZ, maxZ };
       return {
         gliderNdcX: projectedPosition.x,
         gliderNdcY: projectedPosition.y,
-        gliderVisible: Math.abs(projectedPosition.x) <= 1
-          && Math.abs(projectedPosition.y) <= 1
-          && projectedPosition.z >= -1
-          && projectedPosition.z <= 1,
+        gliderBounds,
+        gliderVisible: minX >= -1 && maxX <= 1
+          && minY >= -1 && maxY <= 1
+          && minZ >= -1 && maxZ <= 1,
       };
     },
     dispose() {
