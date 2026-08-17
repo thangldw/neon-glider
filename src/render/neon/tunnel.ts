@@ -81,7 +81,15 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const innerGateEdges = octagonEdges(TUNNEL_RADIUS_X * 0.86, TUNNEL_RADIUS_Y * 0.86);
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   const labelGeometry = new THREE.PlaneGeometry(3.4, 0.72);
-  const gateGlowGeometry = new THREE.PlaneGeometry(9.4, 4.8);
+  const gateGlowGeometry = new THREE.RingGeometry(4.08, 4.42, 8, 1, Math.PI / 8);
+  const gateGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x78f4ff,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
   const scratchMatrix = new THREE.Matrix4();
   const scratchPosition = new THREE.Vector3();
   const scratchQuaternion = new THREE.Quaternion();
@@ -183,9 +191,10 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const gateLabel = new THREE.Mesh(labelGeometry, gateLabelMaterial);
   gateLabel.name = 'gate-number';
   gateLabel.position.set(0, FLOOR_Y + 7.2, 0.16);
-  const gateInnerGlow = new THREE.Mesh(gateGlowGeometry, materials.gateGlass);
+  const gateInnerGlow = new THREE.Mesh(gateGlowGeometry, gateGlowMaterial);
   gateInnerGlow.name = 'gate-inner-glow';
   gateInnerGlow.position.set(0, 0.15, -0.45);
+  gateInnerGlow.scale.set(1.28, 0.86, 1);
   gateInnerGlow.visible = false;
   activeGate.add(gateFrame, gateAccent, gateInnerGlow, gateLabel);
   root.add(ribs, wallGroup, floorGroup, recessPanels, floorSeams, panelDetails, activeGate);
@@ -346,7 +355,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       updateSegments(safeDistance);
       const gateGap = safeGate * GATE_DISTANCE - safeDistance;
       activeGate.position.z = -gateGap - 1;
-      gateInnerGlow.visible = gateGap >= 0 && gateGap <= 18;
+      gateInnerGlow.visible = quality === 'desktop' && gateGap >= 0 && gateGap <= 18;
       if (safeGate !== shownGate) {
         shownGate = safeGate;
         drawGateNumber(gateTexture, safeGate);
@@ -359,6 +368,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       unitBox.dispose();
       labelGeometry.dispose();
       gateGlowGeometry.dispose();
+      gateGlowMaterial.dispose();
       gateTexture.dispose();
       gateLabelMaterial.dispose();
       panelDetailMaterial.dispose();

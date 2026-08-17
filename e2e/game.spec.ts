@@ -420,6 +420,8 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   await setLane(page, 2);
   await screenshot(page, directory, 'gameplay-right.png');
   await advanceSafelyTo(page, 247);
+  await setLane(page, 1);
+  await expect.poll(async () => (await snapshot(page)).run).toMatchObject({ lane: 1, distance: 247 });
   await screenshot(page, directory, 'gate.png');
   await page.getByRole('button', { name: 'Tạm dừng' }).click();
   await screenshot(page, directory, 'paused.png');
@@ -460,48 +462,59 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
 
 test('records bounded real-render performance evidence', async ({ browser, page }, testInfo) => {
   await startRun(page, 43, true);
-  await setSimulationFrozen(page, false);
-  await page.waitForTimeout(750);
-  const inputLatencyMs = await page.evaluate(() => new Promise<number>((resolve) => {
-    const api = (window as typeof window & {
-      __NEON_GLIDER_E2E__?: {
-        snapshot(): E2ESnapshot;
-        setLane(lane: Lane): void;
-        resetDiagnostics(): void;
-      };
-    }).__NEON_GLIDER_E2E__;
-    if (!api) throw new Error('E2E hook unavailable');
-    api.resetDiagnostics();
-    const started = performance.now();
-    api.setLane(api.snapshot().run?.lane === 2 ? 1 : 2);
-    requestAnimationFrame(() => resolve(performance.now() - started));
-  }));
-  await page.waitForTimeout(2_000);
-  const measured = await page.evaluate(() => (
-    window as typeof window & {
-      __NEON_GLIDER_E2E__?: {
-        diagnostics(): {
-          sampleCount: number;
-          medianFrameTimeMs: number;
-          worstFrameTimeMs: number;
-          slowFrameCount: number;
-          longestSlowFrameStreak: number;
-          maxDrawCalls: number;
-          maxGeometries: number;
-          maxTextures: number;
-        } | null;
-      };
-    }
-  ).__NEON_GLIDER_E2E__?.diagnostics());
-  if (!measured) throw new Error('Missing renderer performance diagnostics');
+  await setSimulationFrozen(page, true);
+
+  async function measureState(state: 'normal' | 'nearGate'): Promise<PerfEvidence & { inputLatencyMs: number }> {
+    // Let screenshot readbacks and the just-applied scene state leave the GPU queue before resetting the sampled window.
+    await page.waitForTimeout(2_000);
+    const inputLatencyMs = await page.evaluate(() => new Promise<number>((resolve) => {
+      const api = (window as typeof window & {
+        __NEON_GLIDER_E2E__?: {
+          snapshot(): E2ESnapshot;
+          setLane(lane: Lane): void;
+          resetDiagnostics(): void;
+        };
+      }).__NEON_GLIDER_E2E__;
+      if (!api) throw new Error('E2E hook unavailable');
+      api.resetDiagnostics();
+      const started = performance.now();
+      api.setLane(api.snapshot().run?.lane === 2 ? 1 : 2);
+      requestAnimationFrame(() => resolve(performance.now() - started));
+    }));
+    await page.waitForTimeout(3_000);
+    const measured = await page.evaluate(() => (
+      window as typeof window & {
+        __NEON_GLIDER_E2E__?: {
+          diagnostics(): {
+            sampleCount: number;
+            medianFrameTimeMs: number;
+            worstFrameTimeMs: number;
+            slowFrameCount: number;
+            longestSlowFrameStreak: number;
+            maxDrawCalls: number;
+            maxGeometries: number;
+            maxTextures: number;
+          } | null;
+        };
+      }
+    ).__NEON_GLIDER_E2E__?.diagnostics());
+    if (!measured) throw new Error(`Missing renderer performance diagnostics for ${state}`);
+    const evidence: PerfEvidence & { inputLatencyMs: number } = {
+      project: testInfo.project.name as PerfEvidence['project'],
+      ...measured,
+      inputLatencyMs,
+    };
+    return evidence;
+  }
+
+  const normal = await measureState('normal');
+  await advanceSafelyTo(page, 247);
+  await expect.poll(async () => (await snapshot(page)).run?.distance).toBe(247);
+  const nearGate = await measureState('nearGate');
   const viewport = page.viewportSize();
-  const perfEvidence: PerfEvidence = {
-    project: testInfo.project.name as PerfEvidence['project'],
-    ...measured,
-  };
   const evidence = {
-    ...perfEvidence,
-    inputLatencyMs,
+    project: testInfo.project.name,
+    states: { normal, nearGate },
     browserVersion: browser.version(),
     host: `${os.cpus()[0]?.model ?? 'unknown CPU'}; ${Math.round(os.totalmem() / 1024 ** 3)} GiB; ${os.platform()} ${os.arch()}`,
     viewport,
@@ -511,10 +524,14 @@ test('records bounded real-render performance evidence', async ({ browser, page 
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'performance.json'), `${JSON.stringify(evidence, null, 2)}\n`);
 
-  expect(measured.sampleCount).toBeGreaterThan(30);
-  expect(measured.maxDrawCalls).toBeGreaterThan(10);
-  expect(measured.longestSlowFrameStreak).toBeLessThanOrEqual(3);
-  expect(measured.maxDrawCalls).toBeLessThanOrEqual(testInfo.project.name === 'mobile-chromium' ? 45 : 60);
-  expect(measured.maxGeometries).toBeLessThan(45);
-  expect(inputLatencyMs).toBeLessThan(500);
+  for (const [state, measured] of Object.entries({ normal, nearGate })) {
+    expect(measured.sampleCount, `${state} sample count`).toBeGreaterThan(30);
+    expect(measured.maxDrawCalls, `${state} draw-call floor`).toBeGreaterThan(10);
+    expect(measured.maxDrawCalls, `${state} draw-call cap`).toBeLessThan(
+      testInfo.project.name === 'mobile-chromium' ? 45 : 60,
+    );
+    expect(measured.maxGeometries, `${state} geometry cap`).toBeLessThan(45);
+    expect(measured.longestSlowFrameStreak, `${state} slow-frame streak`).toBeLessThanOrEqual(3);
+    expect(measured.inputLatencyMs, `${state} input latency`).toBeLessThan(500);
+  }
 });

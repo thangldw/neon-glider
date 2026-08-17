@@ -47,9 +47,9 @@ export interface PostFxOptions {
 
 const DESKTOP_BLOOM_RESOLUTION_SCALE = 0.8;
 const MOBILE_BLOOM_RESOLUTION_SCALE = 0.65;
-const DESKTOP_COMPOSER_RESOLUTION_SCALE = 0.3;
+const DESKTOP_COMPOSER_RESOLUTION_SCALE = 0.25;
 const MOBILE_COMPOSER_RESOLUTION_SCALE = 0.75;
-const DESKTOP_BASE_RESOLUTION_SCALE = 0.42;
+const DESKTOP_BASE_RESOLUTION_SCALE = 0.34;
 
 function defaultComposer(renderer: RendererLike, renderTarget: THREE.WebGLRenderTarget): ComposerLike {
   return new EffectComposer(renderer as THREE.WebGLRenderer, renderTarget);
