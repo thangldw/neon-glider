@@ -36,6 +36,17 @@ it('creates the approved emissive PBR cyan-magenta metallic palette', () => {
   materials.dispose();
 });
 
+it('adds owned recess and gate-glass PBR materials', () => {
+  const materials = createNeonMaterials();
+
+  expect(materials.panelRecess).toBeInstanceOf(THREE.MeshStandardMaterial);
+  expect(materials.panelRecess.roughness).toBeGreaterThanOrEqual(0.45);
+  expect(materials.gateGlass).toBeInstanceOf(THREE.MeshPhysicalMaterial);
+  expect(materials.gateGlass.transmission).toBeGreaterThan(0);
+
+  materials.dispose();
+});
+
 it('owns and idempotently disposes every shared material', () => {
   const materials = createNeonMaterials();
   const obstacleEdge = (materials as unknown as { obstacleEdge?: THREE.Material }).obstacleEdge;
@@ -48,6 +59,8 @@ it('owns and idempotently disposes every shared material', () => {
     obstacleEdge!,
     materials.crystal,
     materials.floor,
+    materials.panelRecess,
+    materials.gateGlass,
     materials.trailCyan,
     materials.trailMagenta,
   ];

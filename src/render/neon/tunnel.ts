@@ -81,6 +81,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const innerGateEdges = octagonEdges(TUNNEL_RADIUS_X * 0.86, TUNNEL_RADIUS_Y * 0.86);
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   const labelGeometry = new THREE.PlaneGeometry(3.4, 0.72);
+  const gateGlowGeometry = new THREE.PlaneGeometry(9.4, 4.8);
   const scratchMatrix = new THREE.Matrix4();
   const scratchPosition = new THREE.Vector3();
   const scratchQuaternion = new THREE.Quaternion();
@@ -95,8 +96,9 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     z: number,
     thickness: number,
     depth: number,
+    radialScale = 1,
   ): void {
-    scratchPosition.set(edge.x, edge.y, z);
+    scratchPosition.set(edge.x * radialScale, edge.y * radialScale, z);
     scratchQuaternion.setFromAxisAngle(zAxis, edge.angle);
     scratchScale.set(edge.length, thickness, depth);
     scratchMatrix.compose(scratchPosition, scratchQuaternion, scratchScale);
@@ -124,6 +126,13 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const floorPanels = new THREE.InstancedMesh(unitBox, materials.floor, segmentCount * 3);
   floorPanels.name = 'floor-panel-instances';
   floorGroup.add(floorPanels);
+
+  const recessPanels = new THREE.InstancedMesh(unitBox, materials.panelRecess, segmentCount * 4);
+  recessPanels.name = 'recess-panel-instances';
+  recessPanels.frustumCulled = false;
+  const floorSeams = new THREE.InstancedMesh(unitBox, materials.cyan, segmentCount * 2);
+  floorSeams.name = 'floor-seam-instances';
+  floorSeams.frustumCulled = false;
 
   const panelDetailMaterial = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -171,8 +180,11 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const gateLabel = new THREE.Mesh(labelGeometry, gateLabelMaterial);
   gateLabel.name = 'gate-number';
   gateLabel.position.set(0, FLOOR_Y + 7.2, 0.16);
-  activeGate.add(gateFrame, gateAccent, gateLabel);
-  root.add(ribs, wallGroup, floorGroup, panelDetails, activeGate);
+  const gateInnerGlow = new THREE.Mesh(gateGlowGeometry, materials.gateGlass);
+  gateInnerGlow.name = 'gate-inner-glow';
+  gateInnerGlow.position.set(0, 0.15, -0.45);
+  activeGate.add(gateFrame, gateAccent, gateInnerGlow, gateLabel);
+  root.add(ribs, wallGroup, floorGroup, recessPanels, floorSeams, panelDetails, activeGate);
 
   const loopLength = segmentCount * SEGMENT_SPACING;
   const cyanSegments = new Uint8Array(cyanRibs.count);
@@ -181,6 +193,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
   const magentaOffsets = new Float32Array(magentaRibs.count);
   const wallSegments = new Uint8Array(wallPanels.count);
   const floorSegments = new Uint8Array(floorPanels.count);
+  const recessSegments = new Uint8Array(recessPanels.count);
+  const floorSeamSegments = new Uint8Array(floorSeams.count);
   const detailSegments = new Uint8Array(panelDetails.count);
   const detailOffsets = new Float32Array(panelDetails.count);
   let shownGate = 1;
@@ -197,6 +211,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     let magentaIndex = 0;
     let wallIndex = 0;
     let floorIndex = 0;
+    let recessIndex = 0;
+    let floorSeamIndex = 0;
     let detailIndex = 0;
 
     for (let segment = 0; segment < segmentCount; segment += 1) {
@@ -234,6 +250,28 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
         floorSegments[floorIndex] = segment;
         floorIndex += 1;
       }
+      for (const edgeIndex of [0, 2, 4, 6]) {
+        setBoxMatrix(
+          recessPanels,
+          recessIndex,
+          edges[edgeIndex],
+          ribZ - SEGMENT_SPACING / 2,
+          0.08,
+          SEGMENT_SPACING * 0.66,
+          1.035,
+        );
+        recessSegments[recessIndex] = segment;
+        recessIndex += 1;
+      }
+      for (const seamX of [-1.5, 1.5]) {
+        scratchPosition.set(seamX, FLOOR_Y + 0.015, ribZ - SEGMENT_SPACING / 2);
+        scratchQuaternion.identity();
+        scratchScale.set(0.08, 0.04, SEGMENT_SPACING * 0.84);
+        scratchMatrix.compose(scratchPosition, scratchQuaternion, scratchScale);
+        floorSeams.setMatrixAt(floorSeamIndex, scratchMatrix);
+        floorSeamSegments[floorSeamIndex] = segment;
+        floorSeamIndex += 1;
+      }
       for (const [mesh, x, y, segments, offsets] of [
         [cyanRibs, -1.5, FLOOR_Y + 0.1, cyanSegments, cyanOffsets],
         [cyanRibs, 5.72, -0.9, cyanSegments, cyanOffsets],
@@ -260,6 +298,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     if (wallPanels.instanceColor) wallPanels.instanceColor.needsUpdate = true;
     floorPanels.instanceMatrix.needsUpdate = true;
     if (floorPanels.instanceColor) floorPanels.instanceColor.needsUpdate = true;
+    recessPanels.instanceMatrix.needsUpdate = true;
+    floorSeams.instanceMatrix.needsUpdate = true;
     panelDetails.instanceMatrix.needsUpdate = true;
     if (panelDetails.instanceColor) panelDetails.instanceColor.needsUpdate = true;
   }
@@ -284,6 +324,8 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
     updateInstanceZ(magentaRibs, magentaSegments, phase, magentaOffsets);
     updateInstanceZ(wallPanels, wallSegments, phase, -SEGMENT_SPACING / 2);
     updateInstanceZ(floorPanels, floorSegments, phase, -SEGMENT_SPACING / 2);
+    updateInstanceZ(recessPanels, recessSegments, phase, -SEGMENT_SPACING / 2);
+    updateInstanceZ(floorSeams, floorSeamSegments, phase, -SEGMENT_SPACING / 2);
     updateInstanceZ(panelDetails, detailSegments, phase, detailOffsets);
   }
 
@@ -310,6 +352,7 @@ export function createNeonTunnel({ quality, materials }: NeonTunnelOptions): Neo
       root.clear();
       unitBox.dispose();
       labelGeometry.dispose();
+      gateGlowGeometry.dispose();
       gateTexture.dispose();
       gateLabelMaterial.dispose();
       panelDetailMaterial.dispose();

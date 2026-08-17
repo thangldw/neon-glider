@@ -85,6 +85,19 @@ it('creates a bounded recycled tunnel with named gate and floor groups', () => w
   materials.dispose();
 }));
 
+it('builds bounded tunnel depth layers without increasing per-frame objects', () => withCanvasContext(() => {
+  const materials = createNeonMaterials();
+  const tunnel = createNeonTunnel({ quality: 'desktop', materials });
+
+  expect(tunnel.root.getObjectByName('recess-panel-instances')).toBeInstanceOf(THREE.InstancedMesh);
+  expect(tunnel.root.getObjectByName('floor-seam-instances')).toBeInstanceOf(THREE.InstancedMesh);
+  expect(tunnel.root.getObjectByName('gate-inner-glow')).toBeTruthy();
+  expect(tunnel.root.children.length).toBeLessThan(24);
+
+  tunnel.dispose();
+  materials.dispose();
+}));
+
 it('uses instancing and the reduced mobile segment budget', () => withCanvasContext(() => {
   const materials = createNeonMaterials();
   const tunnel = createNeonTunnel({ quality: 'mobile', materials });
@@ -94,7 +107,12 @@ it('uses instancing and the reduced mobile segment budget', () => withCanvasCont
   });
 
   expect(tunnel.segmentCount).toBe(16);
-  expect(instances).toHaveLength(7);
+  const depthLayers = ['recess-panel-instances', 'floor-seam-instances'].map(
+    (name) => tunnel.root.getObjectByName(name) as THREE.InstancedMesh,
+  );
+
+  expect(instances).toHaveLength(9);
+  expect(depthLayers.reduce((total, mesh) => total + mesh.count, 0)).toBeLessThan(220);
   expect(tunnel.root.getObjectByName('panel-detail-instances')).toMatchObject({ visible: false });
   tunnel.dispose();
   materials.dispose();
@@ -137,21 +155,29 @@ it('keeps a tunnel rib close enough to enclose the chase camera', () => withCanv
 it('reuses preallocated Three.js math objects across repeated segment updates', () => withCanvasContext(() => {
   const materials = createNeonMaterials();
   const tunnel = createNeonTunnel({ quality: 'desktop', materials });
-  const ribs = tunnel.root.getObjectByName('cyan-ribs') as THREE.InstancedMesh;
-  const before = new THREE.Matrix4();
-  const after = new THREE.Matrix4();
-  ribs.getMatrixAt(0, before);
+  const updatedMeshes = ['cyan-ribs', 'recess-panel-instances', 'floor-seam-instances'].map(
+    (name) => tunnel.root.getObjectByName(name) as THREE.InstancedMesh,
+  );
+  const depthInstanceCount = updatedMeshes.slice(1).reduce((total, mesh) => total + mesh.count, 0);
+  const before = updatedMeshes.map((mesh) => {
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(0, matrix);
+    return matrix;
+  });
+  const after = updatedMeshes.map(() => new THREE.Matrix4());
   mathConstructions.matrix4 = 0;
   mathConstructions.vector3 = 0;
   mathConstructions.quaternion = 0;
 
   for (let frame = 1; frame <= 120; frame += 1) tunnel.update(frame / 2, 1);
-  ribs.getMatrixAt(0, after);
-
-  expect(after.elements[14]).not.toBe(before.elements[14]);
-  for (let element = 0; element < 16; element += 1) {
-    if (element !== 14) expect(after.elements[element]).toBe(before.elements[element]);
+  for (const [index, mesh] of updatedMeshes.entries()) {
+    mesh.getMatrixAt(0, after[index]);
+    expect(after[index].elements[14]).not.toBe(before[index].elements[14]);
+    for (let element = 0; element < 16; element += 1) {
+      if (element !== 14) expect(after[index].elements[element]).toBe(before[index].elements[element]);
+    }
   }
+  expect(depthInstanceCount).toBeLessThan(320);
   expect(mathConstructions).toEqual({ matrix4: 0, vector3: 0, quaternion: 0 });
   tunnel.dispose();
   materials.dispose();

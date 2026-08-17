@@ -8,6 +8,8 @@ export interface NeonMaterials {
   readonly obstacleEdge: THREE.MeshBasicMaterial;
   readonly crystal: THREE.MeshPhysicalMaterial;
   readonly floor: THREE.MeshStandardMaterial;
+  readonly panelRecess: THREE.MeshStandardMaterial;
+  readonly gateGlass: THREE.MeshPhysicalMaterial;
   readonly trailCyan: THREE.MeshBasicMaterial;
   readonly trailMagenta: THREE.MeshBasicMaterial;
   readonly ownsMaterials: true;
@@ -74,6 +76,24 @@ export function createNeonMaterials(): NeonMaterials {
     roughness: 0.18,
     flatShading: true,
   });
+  const panelRecess = new THREE.MeshStandardMaterial({
+    color: 0x050817,
+    emissive: 0x080b22,
+    emissiveIntensity: 0.35,
+    metalness: 0.58,
+    roughness: 0.52,
+  });
+  const gateGlass = new THREE.MeshPhysicalMaterial({
+    color: 0x65ecff,
+    emissive: 0x00bce8,
+    emissiveIntensity: 1.4,
+    metalness: 0.08,
+    roughness: 0.12,
+    transmission: 0.22,
+    thickness: 0.3,
+    transparent: true,
+    opacity: 0.88,
+  });
   const trailCyan = new THREE.MeshBasicMaterial({
     color: 0x55efff,
     transparent: true,
@@ -98,6 +118,8 @@ export function createNeonMaterials(): NeonMaterials {
     obstacleEdge,
     crystal,
     floor,
+    panelRecess,
+    gateGlass,
     trailCyan,
     trailMagenta,
   ];
@@ -111,6 +133,8 @@ export function createNeonMaterials(): NeonMaterials {
     obstacleEdge,
     crystal,
     floor,
+    panelRecess,
+    gateGlass,
     trailCyan,
     trailMagenta,
     ownsMaterials: true,
