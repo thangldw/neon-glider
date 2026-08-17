@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { advanceRunner, createRunner, moveRunnerLane } from '../../src/simulation/runner';
+import * as trackGenerator from '../../src/simulation/track-generator';
 import { isRunnerState, loadRunner, saveRunner } from '../../src/storage/runner-storage';
 
 class MapStorage implements Storage {
@@ -59,23 +60,41 @@ it('rejects states whose random continuation or entities are inconsistent', () =
   expect(isRunnerState({ ...run, reachableLanes: changedReachableLanes })).toBe(false);
 });
 
-it('accepts a legitimate progressed state after crossed entities are removed', () => {
+it('accepts a legitimate long progressed state after crossed entities are removed', () => {
   let run = createRunner(1);
 
-  for (let tick = 0; tick < 13; tick += 1) {
+  for (let tick = 0; tick < 600; tick += 1) {
     const nextObstacleDistance = Math.min(...run.entities.filter((entity) => entity.kind !== 'crystal').map((entity) => entity.distance));
     const blockedLanes = run.entities
       .filter((entity) => entity.kind !== 'crystal' && entity.distance === nextObstacleDistance)
       .map((entity) => entity.lane);
     const safeLane = ([0, 1, 2] as const).find((lane) => !blockedLanes.includes(lane));
-    run = moveRunnerLane(run, Math.sign((safeLane ?? run.lane) - run.lane));
+    if (safeLane === undefined) throw new Error('generated track must retain a safe lane');
+    while (run.lane !== safeLane) run = moveRunnerLane(run, Math.sign(safeLane - run.lane));
     run = advanceRunner(run, 0.25);
   }
 
   expect(run).toMatchObject({ status: 'playing' });
-  expect(run.distance).toBeGreaterThan(80);
+  expect(run.distance).toBeGreaterThan(5_900);
   expect(run.entities.some((entity) => entity.distance <= run.distance)).toBe(false);
   expect(isRunnerState(run)).toBe(true);
+});
+
+it('rejects impossible and oversized cursors before reconstructing generated segments', () => {
+  const run = createRunner(1);
+  const generateSegment = vi.spyOn(trackGenerator, 'generateSegment');
+  try {
+    expect(isRunnerState({ ...run, segmentCursor: run.segmentCursor + 1 })).toBe(false);
+    expect(isRunnerState({
+      ...run,
+      distance: 199_480,
+      gates: Math.floor(199_480 / 250),
+      segmentCursor: 10_000,
+    })).toBe(false);
+    expect(generateSegment).not.toHaveBeenCalled();
+  } finally {
+    generateSegment.mockRestore();
+  }
 });
 
 it('clears corrupt JSON and reports unavailable storage without throwing', () => {

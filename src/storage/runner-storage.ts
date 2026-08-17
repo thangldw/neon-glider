@@ -10,6 +10,8 @@ const RUNNER_KEYS = [
 ] as const;
 const ENTITY_KEYS = ['id', 'kind', 'lane', 'distance', 'segment'] as const;
 const INITIAL_REACHABLE_LANES: readonly Lane[] = [0, 1, 2];
+// Bounds synchronous persisted-state validation to about 20 km of a standard 20 m segment track.
+const MAX_PERSISTED_SEGMENTS = 1024;
 
 type UnavailableHandler = () => void;
 
@@ -86,6 +88,20 @@ function sameEntities(actual: unknown[], expected: readonly TrackEntity[]): bool
   return actual.length === expected.length && actual.every((entity, index) => hasExactEntity(entity, expected[index]));
 }
 
+function expectedSegmentCursor(distance: number): number {
+  return Math.floor((distance + LOOKAHEAD_DISTANCE - 80) / SEGMENT_LENGTH) + 1;
+}
+
+function hasBoundedCursor(status: RunStatus, distance: number, segmentCursor: number): boolean {
+  const expected = expectedSegmentCursor(distance);
+  if (!Number.isSafeInteger(expected) || expected > MAX_PERSISTED_SEGMENTS || segmentCursor > MAX_PERSISTED_SEGMENTS) {
+    return false;
+  }
+  return status === 'complete'
+    ? segmentCursor === expected || segmentCursor === expected - 1
+    : segmentCursor === expected;
+}
+
 function clearInvalid(storage: Storage, onUnavailable: UnavailableHandler): void {
   try {
     storage.removeItem(RUN_STORAGE_KEY);
@@ -115,7 +131,8 @@ export function isRunnerState(value: unknown): value is RunnerState {
     || !isFiniteNonNegative(value.score)
     || typeof value.multiplier !== 'number' || !Number.isFinite(value.multiplier) || value.multiplier < 1 || value.multiplier > 8
     || !isNonNegativeSafeInteger(gates) || gates !== Math.floor(distance / GATE_DISTANCE)
-    || !isNonNegativeSafeInteger(value.crystals) || !isNonNegativeSafeInteger(segmentCursor)) {
+    || !isNonNegativeSafeInteger(value.crystals) || !isNonNegativeSafeInteger(segmentCursor)
+    || !hasBoundedCursor(value.status, distance, segmentCursor)) {
     return false;
   }
 
