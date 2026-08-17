@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { RendererDiagnostics } from '../diagnostics/perf-overlay';
 import type { Lane, RunnerState } from '../simulation/runner-types';
+import { createNeonAtmosphere, type NeonAtmosphere } from './neon/atmosphere';
 import { createEntityField, type EntityField } from './neon/entity-field';
 import { createNeonMaterials, type NeonMaterials } from './neon/materials';
 import {
@@ -51,12 +52,6 @@ export interface RunnerViewOptions {
   onContextRestored?: () => void;
 }
 
-interface SpeedStreaks {
-  readonly points: THREE.Points;
-  update(distance: number, elapsedSeconds: number, speed: number, reducedMotion: boolean): void;
-  dispose(): void;
-}
-
 interface SceneGraph {
   readonly quality: 'desktop' | 'mobile';
   readonly scene: THREE.Scene;
@@ -66,7 +61,7 @@ interface SceneGraph {
   readonly ship: NeonShip;
   readonly shipAnchor: THREE.Group;
   readonly entityField: EntityField;
-  readonly streaks: SpeedStreaks;
+  readonly atmosphere: NeonAtmosphere;
   readonly postFx: PostFx;
   dispose(): void;
 }
@@ -82,66 +77,6 @@ function defaultRenderer(canvas: HTMLCanvasElement): RendererLike {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.82;
   return renderer;
-}
-
-function createSpeedStreaks(quality: 'desktop' | 'mobile', materials: NeonMaterials): SpeedStreaks {
-  const count = quality === 'desktop' ? 72 : 40;
-  const positions = new Float32Array(count * 3);
-  const baseZ = new Float32Array(count);
-  const colors = new Float32Array(count * 3);
-  const cyan = new THREE.Color(materials.cyan.color);
-  const magenta = new THREE.Color(materials.magenta.color);
-  for (let index = 0; index < count; index += 1) {
-    const side = index % 2 === 0 ? -1 : 1;
-    positions[index * 3] = side * (3.65 + ((index * 17) % 19) * 0.12);
-    positions[index * 3 + 1] = -2.9 + ((index * 11) % 23) * 0.25;
-    baseZ[index] = 4 + ((index * 37) % 173);
-    const color = index % 3 === 0 ? magenta : cyan;
-    colors[index * 3] = color.r;
-    colors[index * 3 + 1] = color.g;
-    colors[index * 3 + 2] = color.b;
-  }
-  const geometry = new THREE.BufferGeometry();
-  const positionAttribute = new THREE.BufferAttribute(positions, 3);
-  positionAttribute.setUsage(THREE.DynamicDrawUsage);
-  geometry.setAttribute('position', positionAttribute);
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const material = new THREE.PointsMaterial({
-    size: quality === 'desktop' ? 0.075 : 0.06,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.72,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
-  });
-  const points = new THREE.Points(geometry, material);
-  points.name = 'speed-streaks';
-  points.visible = quality === 'desktop';
-  points.frustumCulled = false;
-  let disposed = false;
-
-  return {
-    points,
-    update(distance, elapsedSeconds, speed, reducedMotion) {
-      if (disposed) return;
-      const safeDistance = Number.isFinite(distance) ? distance : 0;
-      const safeTime = Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0;
-      const speedPhase = reducedMotion ? 0 : safeTime * THREE.MathUtils.clamp(speed, 26, 52) * 0.35;
-      for (let index = 0; index < count; index += 1) {
-        positions[index * 3 + 2] = -(((baseZ[index] + safeDistance + speedPhase) % 177) + 3);
-      }
-      positionAttribute.needsUpdate = true;
-      material.opacity = reducedMotion ? 0.42 : 0.72;
-    },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      points.removeFromParent();
-      geometry.dispose();
-      material.dispose();
-    },
-  };
 }
 
 function cloneSnapshot(snapshot: RunnerState): RunnerState {
@@ -221,20 +156,20 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     let tunnel: NeonTunnel | null = null;
     let ship: NeonShip | null = null;
     let entityField: EntityField | null = null;
-    let streaks: SpeedStreaks | null = null;
+    let atmosphere: NeonAtmosphere | null = null;
     let postFx: PostFx | null = null;
     try {
       tunnel = createNeonTunnel({ quality, materials });
       ship = createNeonShip(materials);
       entityField = createEntityField(materials);
-      streaks = createSpeedStreaks(quality, materials);
+      atmosphere = createNeonAtmosphere(quality, materials);
       const shipAnchor = new THREE.Group();
       shipAnchor.name = 'neon-ship-anchor';
       shipAnchor.position.set(0, quality === 'mobile' ? -2.25 : -0.9, quality === 'mobile' ? 2.2 : -3);
       shipAnchor.scale.setScalar(quality === 'mobile' ? 0.5 : 0.75);
       shipAnchor.add(ship.root);
 
-      scene.add(tunnel.root, entityField.root, streaks.points, shipAnchor);
+      scene.add(tunnel.root, entityField.root, atmosphere.root, shipAnchor);
       for (const name of [
         'cyan-ribs',
         'magenta-ribs',
@@ -245,13 +180,14 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       ]) {
         scene.getObjectByName(name)?.layers.enable(1);
       }
-      scene.add(new THREE.HemisphereLight(0x72cfff, 0x24001d, 1.15));
-      const key = new THREE.DirectionalLight(0xc790ff, 2.1);
+      scene.add(new THREE.HemisphereLight(0x74d9ff, 0x210019, 0.9));
+      const key = new THREE.DirectionalLight(0xb889ff, 1.7);
       key.position.set(2.5, 7, 5);
-      scene.add(key);
-      const cyanFill = new THREE.PointLight(0x00cfff, quality === 'desktop' ? 5 : 4, 38, 2);
-      cyanFill.position.set(-4.2, -0.6, 5.5);
-      scene.add(cyanFill);
+      const cyanFill = new THREE.PointLight(0x00cfff, quality === 'desktop' ? 4.2 : 3.2, 34, 2);
+      cyanFill.position.set(-4, -0.5, 4);
+      const magentaRim = new THREE.PointLight(0xff20c8, quality === 'desktop' ? 2.8 : 2.2, 28, 2);
+      magentaRim.position.set(4, 1.4, -6);
+      scene.add(key, cyanFill, magentaRim);
       const postFxFactory = options.createPostFx ?? createPostFx;
       try {
         postFx = postFxFactory(renderer, scene, camera, {
@@ -275,13 +211,13 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
         ship,
         shipAnchor,
         entityField,
-        streaks,
+        atmosphere,
         postFx,
         dispose() {
           if (graphDisposed) return;
           graphDisposed = true;
           postFx?.dispose();
-          streaks?.dispose();
+          atmosphere?.dispose();
           entityField?.dispose();
           ship?.dispose();
           tunnel?.dispose();
@@ -292,7 +228,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       return complete;
     } catch (error) {
       postFx?.dispose();
-      streaks?.dispose();
+      atmosphere?.dispose();
       entityField?.dispose();
       ship?.dispose();
       tunnel?.dispose();
@@ -317,13 +253,13 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       target.entityField.sync(snapshot.entities, snapshot.distance);
       target.ship.setLaneX(LANE_X[snapshot.lane], deltaSeconds, snapLane || reducedMotion);
       target.ship.update(visualElapsedSeconds, snapshot.speed, reducedMotion);
-      target.streaks.update(snapshot.distance, visualElapsedSeconds, snapshot.speed, reducedMotion);
+      target.atmosphere.update(snapshot.distance, visualElapsedSeconds, snapshot.speed, reducedMotion);
     } else {
       target.tunnel.update(0, 1);
       target.entityField.sync([], 0);
       target.ship.setLaneX(0, deltaSeconds, reducedMotion);
       target.ship.update(visualElapsedSeconds, 26, reducedMotion);
-      target.streaks.update(0, visualElapsedSeconds, 26, reducedMotion);
+      target.atmosphere.update(0, visualElapsedSeconds, 26, reducedMotion);
     }
 
     const shipX = target.ship.root.position.x * target.shipAnchor.scale.x;

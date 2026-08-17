@@ -100,7 +100,7 @@ it('builds the chase scene and mirrors snapshots without mutating simulation sta
   view.dispose();
 });
 
-it('uses a bounded cyan-magenta light hierarchy with one PBR point fill', () => {
+it('uses the bounded cinematic cyan-magenta light rig', () => {
   const renderer = rendererFixture();
   const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
   view.setSnapshot(createRunner(5));
@@ -108,8 +108,15 @@ it('uses a bounded cyan-magenta light hierarchy with one PBR point fill', () => 
   const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
   const fills = scene.children.filter((object): object is THREE.PointLight => object instanceof THREE.PointLight);
 
-  expect(fills).toHaveLength(1);
+  expect(fills).toHaveLength(2);
   expect(fills[0].color.getHex()).toBe(0x00cfff);
+  expect(fills[0]).toMatchObject({ intensity: 4.2, distance: 34, decay: 2 });
+  expect(fills[1].color.getHex()).toBe(0xff20c8);
+  expect(fills[1]).toMatchObject({ intensity: 2.8, distance: 28, decay: 2 });
+  const hemisphere = scene.children.find((object): object is THREE.HemisphereLight => object instanceof THREE.HemisphereLight);
+  const key = scene.children.find((object): object is THREE.DirectionalLight => object instanceof THREE.DirectionalLight);
+  expect(hemisphere).toMatchObject({ intensity: 0.9 });
+  expect(key).toMatchObject({ intensity: 1.7 });
   view.dispose();
 });
 

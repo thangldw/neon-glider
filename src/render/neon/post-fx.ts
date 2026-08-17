@@ -115,9 +115,9 @@ export function createPostFx(
       const [bloomWidth, bloomHeight] = scaledSize(composerWidth, composerHeight, bloomScale);
       bloomPass = new UnrealBloomPass(
         new THREE.Vector2(bloomWidth, bloomHeight),
-        options.quality === 'mobile' ? 0.34 : 0.38,
-        0.3,
-        0.54,
+        options.quality === 'mobile' ? 0.32 : 0.44,
+        options.quality === 'mobile' ? 0.28 : 0.34,
+        options.quality === 'mobile' ? 0.62 : 0.58,
       );
       const outputPass = new OutputPass();
       passes.push(renderPass, bloomPass, outputPass);
