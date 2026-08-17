@@ -73,6 +73,12 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
     return mesh;
   }
 
+  function addPartMarker(name: string): void {
+    const marker = new THREE.Group();
+    marker.name = name;
+    root.add(marker);
+  }
+
   function mergeParts(parts: readonly {
     geometry: THREE.BufferGeometry;
     position: readonly [number, number, number];
@@ -103,6 +109,10 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   engineGeometry.rotateX(Math.PI / 2);
   const glowGeometry = own(new THREE.CylinderGeometry(0.23, 0.23, 0.12, 8));
   glowGeometry.rotateX(Math.PI / 2);
+  const engineRingGeometry = own(new THREE.TorusGeometry(0.37, 0.07, 6, 12));
+  const exhaustCoreGeometry = own(new THREE.CylinderGeometry(0.16, 0.22, 0.36, 8));
+  exhaustCoreGeometry.rotateX(Math.PI / 2);
+  const canopyGeometry = own(new THREE.SphereGeometry(0.5, 8, 6));
   const cockpitCore = new THREE.ConeGeometry(0.43, 1.38, 5);
   cockpitCore.rotateX(-Math.PI / 2);
   const cockpitParts: THREE.BufferGeometry[] = [cockpitCore];
@@ -136,6 +146,8 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
     { geometry: wingGeometry, position: [-0.12, -0.08, 0], scale: [-1, 1, 1] },
     { geometry: engineGeometry, position: [-1.12, -0.12, 0.72] },
     { geometry: engineGeometry, position: [1.12, -0.12, 0.72] },
+    { geometry: engineRingGeometry, position: [-1.12, -0.12, 1.34] },
+    { geometry: engineRingGeometry, position: [1.12, -0.12, 1.34] },
   ]);
   add('airframe', airframeGeometry, shipMetal, [0, 0, 0]);
   const armorGeometry = mergeParts([
@@ -144,9 +156,23 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
     { geometry: unitBox, position: [0.58, 0.02, 0.35], scale: [0.45, 0.32, 1.55], rotationY: 0.16 },
   ]);
   add('armor-panels', armorGeometry, armorMaterial, [0, 0, 0]);
-  const glowLeft = add('engine-glow-left', glowGeometry, materials.magenta, [-1.12, -0.12, 1.38]);
-  const glowRight = add('engine-glow-right', glowGeometry, materials.magenta, [1.12, -0.12, 1.38]);
-  add('cockpit-light', cockpitGeometry, cockpitMaterial, [0, 0.45, -0.72]);
+  const cockpitAssemblyGeometry = mergeParts([
+    { geometry: cockpitGeometry, position: [0, 0.45, -0.72] },
+    { geometry: canopyGeometry, position: [0, 0.6, -0.74], scale: [0.78, 0.46, 1.32] },
+  ]);
+  add('cockpit-light', cockpitAssemblyGeometry, cockpitMaterial, [0, 0, 0]);
+  const exhaustGeometry = mergeParts([
+    { geometry: glowGeometry, position: [-1.12, -0.12, 1.38] },
+    { geometry: glowGeometry, position: [1.12, -0.12, 1.38] },
+    { geometry: exhaustCoreGeometry, position: [-1.12, -0.12, 1.58] },
+    { geometry: exhaustCoreGeometry, position: [1.12, -0.12, 1.58] },
+  ]);
+  const exhaust = add('engine-exhaust', exhaustGeometry, materials.magenta, [0, 0, 0]);
+  addPartMarker('canopy-shell');
+  addPartMarker('engine-ring-left');
+  addPartMarker('engine-ring-right');
+  addPartMarker('exhaust-core-left');
+  addPartMarker('exhaust-core-right');
 
   const edgeLeft = add('edge-light-left', unitBox, materials.magenta, [-1.75, 0.02, 0.52]);
   edgeLeft.scale.set(1.55, 0.11, 0.14);
@@ -187,21 +213,20 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
       if (reducedMotion) {
         root.position.y = 0;
         root.rotation.x = 0;
+        root.rotation.z = 0;
         trailLeft.scale.set(1, 1, 1);
         trailRight.scale.set(1, 1, 1);
-        glowLeft.scale.set(1, 1, 1);
-        glowRight.scale.set(1, 1, 1);
+        exhaust.scale.set(1, 1, 1);
         return;
       }
       const time = Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0;
       const normalizedSpeed = THREE.MathUtils.clamp((speed - 26) / 26, 0, 1);
-      const pulse = 1 + Math.sin(time * 15) * 0.08;
+      const pulse = 1 + Math.sin(time * 15) * 0.06;
       root.position.y = Math.sin(time * 2.6) * 0.08;
       root.rotation.x = Math.sin(time * 1.7) * 0.018;
-      trailLeft.scale.set(pulse, pulse, 0.9 + normalizedSpeed * 0.42);
+      trailLeft.scale.set(pulse, pulse, 1 + normalizedSpeed * 0.55);
       trailRight.scale.copy(trailLeft.scale);
-      glowLeft.scale.setScalar(pulse);
-      glowRight.scale.copy(glowLeft.scale);
+      exhaust.scale.setScalar(pulse);
     },
     dispose() {
       if (disposed) return;
