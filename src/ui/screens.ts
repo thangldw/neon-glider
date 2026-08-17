@@ -91,7 +91,7 @@ export function createGameScreen(onPause: () => void): GameScreen {
   leftHud.setAttribute('aria-label', 'Điểm');
   leftHud.append(score.root, multiplier.root);
 
-  const distance = metric('DISTANCE', 'distance');
+  const distance = metric('DISTANCE', 'distance', 'distance-metric');
   distance.value.classList.add('hud-number');
   const distanceUnit = element('span', 'hud-unit');
   distanceUnit.dataset.distanceUnit = '';

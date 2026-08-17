@@ -29,6 +29,7 @@ it('separates numeric HUD values from their units without changing update hooks'
   expect(screen.element.querySelector('[data-score]')?.classList).toContain('hud-number');
   expect(screen.element.querySelector('[data-distance]')?.textContent).toBe('2,734');
   expect(screen.element.querySelector('[data-distance-unit]')?.textContent).toBe('m');
+  expect(screen.element.querySelector('[data-distance]')?.parentElement?.classList).toContain('distance-metric');
   expect(screen.element.querySelector('[data-gate]')?.textContent).toBe('GATE 12');
   expect(screen.element.querySelector('[data-energy-bar]')?.classList).toContain('energy-track');
 });
