@@ -1,5 +1,5 @@
 {
-  "name": "hanzi-glider",
+  "name": "neon-glider",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -10,12 +10,7 @@
     "test:watch": "vitest",
     "pretest:e2e": "npm run build",
     "test:e2e": "playwright test",
-    "content:fetch": "tsx scripts/fetch-hsk3.mts",
-    "content:draft": "tsx scripts/draft-meanings.mts",
-    "content:repair": "tsx scripts/repair-vietnamese-drafts.mts",
-    "content:build": "tsx scripts/build-content.mts",
-    "content:verify": "tsx scripts/verify-content.mts",
-    "predeploy": "npm test && npm run content:verify && npm run build",
+    "predeploy": "npm test && npm run build && npm run test:e2e",
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
@@ -26,11 +21,8 @@
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.2.0",
     "@types/three": "^0.185.4",
-    "cheerio": "^1.2.0",
-    "csv-parse": "^7.0.2",
     "gh-pages": "^6.3.0",
     "jsdom": "^30.0.1",
-    "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"

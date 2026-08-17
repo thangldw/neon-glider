@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const pagesPath = '/hanzi-glider/';
+const pagesPath = '/neon-glider/';
 
 export default defineConfig({
   testDir: './e2e',

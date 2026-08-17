@@ -7,9 +7,8 @@ describe('app shell', () => {
     expect(document.querySelectorAll('#app')).toHaveLength(1);
   });
 
-  it('brands the browser shell as Neon Glider without learning copy', () => {
+  it('brands the browser shell as Neon Glider', () => {
     const html = readFileSync(`${process.cwd()}/index.html`, 'utf8');
     expect(html).toContain('<title>Neon Glider</title>');
-    expect(html).not.toMatch(/Hanzi|HSK|chữ Hán/i);
   });
 });

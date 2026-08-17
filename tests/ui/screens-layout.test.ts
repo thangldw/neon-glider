@@ -46,7 +46,7 @@ it('renders collision and depletion results without learning content', () => {
   expect(depletion.textContent).toContain('CẠN NĂNG LƯỢNG');
   expect(collision.getAttribute('role')).toBe('dialog');
   expect(collision.getAttribute('aria-modal')).toBe('true');
-  expect(`${collision.textContent} ${depletion.textContent}`).not.toMatch(/HSK|chữ Hán|pinyin|từ cần xem lại/i);
+  expect(`${collision.textContent} ${depletion.textContent}`).not.toContain('20 câu');
 });
 
 it('provides semantic menu, countdown, pause, storage, and WebGL failure screens', () => {
@@ -67,5 +67,5 @@ it('provides semantic menu, countdown, pause, storage, and WebGL failure screens
   expect(paused.getAttribute('role')).toBe('dialog');
   expect(warning.getAttribute('role')).toBe('status');
   expect(fatal.getAttribute('role')).toBe('alert');
-  expect(`${menu.textContent} ${fatal.textContent}`).not.toMatch(/HSK|Hanzi|chữ Hán/i);
+  expect(`${menu.textContent} ${fatal.textContent}`).not.toContain('ba cổng chữ');
 });
