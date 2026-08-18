@@ -24,6 +24,7 @@ export interface RendererLike {
 export interface PostFx {
   render(): void;
   setSize(width: number, height: number): void;
+  invalidateBloom?(): void;
   dispose(): void;
 }
 
@@ -51,6 +52,7 @@ const MOBILE_BLOOM_RESOLUTION_SCALE = 0.65;
 const DESKTOP_COMPOSER_RESOLUTION_SCALE = 0.2;
 const MOBILE_COMPOSER_RESOLUTION_SCALE = 0.75;
 const DESKTOP_BASE_RESOLUTION_SCALE = 0.5;
+const DETAIL_DEFAULT_COLOR = new THREE.Color(0xffffff);
 
 const RECONSTRUCTION_VERTEX_SHADER = /* glsl */`
   varying vec2 vUv;
@@ -94,7 +96,9 @@ const RECONSTRUCTION_FRAGMENT_SHADER = /* glsl */`
 interface DetailMaterialBinding {
   readonly object: THREE.Mesh;
   readonly original: THREE.Material | THREE.Material[];
+  readonly sources: readonly THREE.Material[];
   readonly proxy: THREE.Material | THREE.Material[];
+  readonly proxies: readonly THREE.Material[];
 }
 
 function createDetailMaterialProxy(source: THREE.Material): THREE.Material {
@@ -133,6 +137,45 @@ function createDetailMaterialProxy(source: THREE.Material): THREE.Material {
   proxy.premultipliedAlpha = source.premultipliedAlpha;
   proxy.toneMapped = source.toneMapped;
   return proxy;
+}
+
+function syncDetailMaterialProxy(source: THREE.Material, proxy: THREE.Material): void {
+  if (!(proxy instanceof THREE.MeshBasicMaterial)) return;
+  const colored = source as THREE.Material & {
+    color?: THREE.Color;
+    emissive?: THREE.Color;
+    emissiveIntensity?: number;
+    map?: THREE.Texture | null;
+    wireframe?: boolean;
+    vertexColors?: boolean;
+  };
+  if (source instanceof THREE.MeshBasicMaterial) {
+    proxy.color.copy(source.color);
+  } else {
+    proxy.color.copy(colored.color ?? DETAIL_DEFAULT_COLOR).multiplyScalar(0.72);
+    if (colored.emissive) {
+      const emissiveScale = (colored.emissiveIntensity ?? 1) * 0.72;
+      proxy.color.r += colored.emissive.r * emissiveScale;
+      proxy.color.g += colored.emissive.g * emissiveScale;
+      proxy.color.b += colored.emissive.b * emissiveScale;
+    }
+  }
+  proxy.map = colored.map ?? null;
+  proxy.wireframe = colored.wireframe ?? false;
+  proxy.vertexColors = colored.vertexColors ?? false;
+  proxy.transparent = source.transparent;
+  proxy.opacity = source.opacity;
+  proxy.alphaTest = source.alphaTest;
+  proxy.blending = source.blending;
+  proxy.side = source.side;
+  proxy.depthTest = source.depthTest;
+  proxy.depthWrite = source.depthWrite;
+  proxy.colorWrite = source.colorWrite;
+  proxy.polygonOffset = source.polygonOffset;
+  proxy.polygonOffsetFactor = source.polygonOffsetFactor;
+  proxy.polygonOffsetUnits = source.polygonOffsetUnits;
+  proxy.premultipliedAlpha = source.premultipliedAlpha;
+  proxy.toneMapped = source.toneMapped;
 }
 
 function defaultComposer(renderer: RendererLike, renderTarget: THREE.WebGLRenderTarget): ComposerLike {
@@ -190,7 +233,12 @@ export function createPostFx(
     camera.layers.set(options.detailLayer);
     scene.background = null;
     webglRenderer.autoClear = false;
-    for (const binding of detailMaterialBindings) binding.object.material = binding.proxy;
+    for (const binding of detailMaterialBindings) {
+      for (let index = 0; index < binding.sources.length; index += 1) {
+        syncDetailMaterialProxy(binding.sources[index], binding.proxies[index]);
+      }
+      binding.object.material = binding.proxy;
+    }
     try {
       webglRenderer.setRenderTarget(null);
       directRender();
@@ -295,7 +343,9 @@ export function createPostFx(
             detailMaterialBindings.push({
               object,
               original,
+              sources: sourceMaterials,
               proxy: Array.isArray(original) ? proxyMaterials : proxyMaterials[0],
+              proxies: proxyMaterials,
             });
           });
         }
@@ -366,6 +416,10 @@ export function createPostFx(
       } catch {
         disposeComposition();
       }
+    },
+    invalidateBloom() {
+      if (disposed || !hybridComposition) return;
+      hybridFrame = 0;
     },
     dispose() {
       if (disposed) return;

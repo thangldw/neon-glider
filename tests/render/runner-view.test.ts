@@ -175,14 +175,37 @@ it('moves desktop gameplay silhouettes to the full-resolution detail layer', () 
       }
     });
   }
-  for (const name of ['feedback-particles', 'feedback-shockwave']) {
-    const object = scene?.getObjectByName(name);
-    expect(object?.layers.isEnabled(2), name).toBe(true);
-    expect(object?.layers.isEnabled(0), name).toBe(false);
-    expect(object?.layers.isEnabled(1), name).toBe(true);
-  }
+  const particles = scene?.getObjectByName('feedback-particles');
+  expect(particles?.layers.isEnabled(1)).toBe(true);
+  expect(particles?.layers.isEnabled(0)).toBe(false);
+  expect(particles?.layers.isEnabled(2)).toBe(false);
+  const shockwave = scene?.getObjectByName('feedback-shockwave');
+  expect(shockwave?.layers.isEnabled(2)).toBe(true);
+  expect(shockwave?.layers.isEnabled(0)).toBe(false);
+  expect(shockwave?.layers.isEnabled(1)).toBe(false);
   expect(scene?.getObjectByName('speed-streaks')?.layers.isEnabled(0)).toBe(true);
   expect(scene?.getObjectByName('speed-streaks')?.layers.isEnabled(2)).toBe(false);
+  view.dispose();
+});
+
+it('routes mobile feedback particles through bloom and shockwave through the base pass', () => {
+  const renderer = rendererFixture();
+  let scene: THREE.Scene | undefined;
+  const view = createRunnerView(containerFixture(412, 915), {
+    ...fixtureOptions(renderer),
+    forceQuality: 'mobile',
+    createPostFx: (target, createdScene, camera) => {
+      scene = createdScene;
+      return { render: () => target.render(createdScene, camera), setSize: vi.fn(), dispose: vi.fn() };
+    },
+  });
+
+  const particles = scene?.getObjectByName('feedback-particles');
+  expect(particles?.layers.isEnabled(1)).toBe(true);
+  expect(particles?.layers.isEnabled(0)).toBe(false);
+  const shockwave = scene?.getObjectByName('feedback-shockwave');
+  expect(shockwave?.layers.isEnabled(0)).toBe(true);
+  expect(shockwave?.layers.isEnabled(1)).toBe(false);
   view.dispose();
 });
 
@@ -293,8 +316,6 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
       lane: number;
       sceneDrawCalls: number;
       geometries: number;
-      activeFeedbackDrawCalls: number;
-      inactiveFeedbackDrawCalls: number;
       groupedDrawCalls: number;
       framing: {
         gliderVisible: boolean;
@@ -344,13 +365,6 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
           view.render(lane + 1);
           const diagnostics = view.getDiagnostics();
           const sceneDrawCalls = diagnostics.drawCalls;
-          view.playFeedback({ kind: 'collision' });
-          view.render(lane + 1.1);
-          const activeFeedbackDrawCalls = view.getDiagnostics().drawCalls;
-          view.render(lane + 1.2);
-          view.render(lane + 1.3);
-          view.render(lane + 1.4);
-          const inactiveFeedbackDrawCalls = view.getDiagnostics().drawCalls;
           const framing = view.getFramingDiagnostics();
           const fuselage = renderedScene?.getObjectByName('airframe') as import('three').Mesh;
           const geometry = fuselage.geometry;
@@ -361,12 +375,12 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
           geometry.addGroup(0, drawCount, 0);
           geometry.addGroup(0, drawCount, 1);
           fuselage.material = [originalMaterial, extraMaterial];
-          view.render(lane + 1.4);
+          view.render(lane + 1);
           const groupedDrawCalls = view.getDiagnostics().drawCalls;
           geometry.clearGroups();
           fuselage.material = originalMaterial;
           extraMaterial.dispose();
-          laneResults.push({ lane, sceneDrawCalls, geometries: diagnostics.geometries, activeFeedbackDrawCalls, inactiveFeedbackDrawCalls, groupedDrawCalls, framing });
+          laneResults.push({ lane, sceneDrawCalls, geometries: diagnostics.geometries, groupedDrawCalls, framing });
         }
         view.dispose();
         return laneResults;
@@ -382,10 +396,122 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
       expect(result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(budget);
       expect(result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(representativeCeiling);
       expect(result.geometries, JSON.stringify(result)).toBeLessThan(45);
-      expect(result.activeFeedbackDrawCalls - result.sceneDrawCalls, JSON.stringify(result)).toBeGreaterThanOrEqual(1);
-      expect(result.activeFeedbackDrawCalls - result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(2);
-      expect(result.inactiveFeedbackDrawCalls, JSON.stringify(result)).toBe(result.sceneDrawCalls);
       expect(result.groupedDrawCalls, JSON.stringify(result)).toBeGreaterThan(result.sceneDrawCalls);
+    }
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+}, 20_000);
+
+it('keeps production-composer feedback within two complete-frame submissions', async () => {
+  const server = await createServer({
+    configFile: false,
+    root: process.cwd(),
+    logLevel: 'silent',
+    server: { host: '127.0.0.1', port: 0 },
+    plugins: [{
+      name: 'runner-feedback-production-test-page',
+      configureServer(vite) {
+        vite.middlewares.use('/__runner-feedback-production-test.html', (_request, response) => {
+          response.statusCode = 200;
+          response.setHeader('Content-Type', 'text/html');
+          response.end('<!doctype html><html><head><script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js"}}</script></head><body></body></html>');
+        });
+      },
+    }],
+  });
+  await server.listen();
+  const address = server.httpServer?.address() as AddressInfo;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const results: Array<{
+      quality: 'desktop' | 'mobile';
+      bloomBaseline: number;
+      cachedBaseline: number;
+      activeFirstFrame: number;
+      activeCachedFrame: number;
+      geometries: number;
+      baseShipLuma: number;
+      activeShipLuma: number;
+      activeShockwaveOpacity: number;
+    }> = [];
+    for (const [width, height, quality] of [
+      [1536, 1024, 'desktop'],
+      [412, 915, 'mobile'],
+    ] as const) {
+      const page = await browser.newPage({ viewport: { width, height } });
+      await page.goto(`http://127.0.0.1:${address.port}/__runner-feedback-production-test.html`);
+      const result = await page.evaluate(async ({ quality }) => {
+        const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<Record<string, unknown>>;
+        const [three, viewModule, runnerModule] = await Promise.all([
+          dynamicImport('three'),
+          dynamicImport('/src/render/runner-view.ts'),
+          dynamicImport('/src/simulation/runner.ts'),
+        ]);
+        const THREE = three as typeof import('three');
+        const createRunnerView = viewModule.createRunnerView as typeof import('../../src/render/runner-view').createRunnerView;
+        const createRunner = runnerModule.createRunner as typeof import('../../src/simulation/runner').createRunner;
+        const container = document.createElement('div');
+        Object.assign(container.style, { width: quality === 'desktop' ? '1536px' : '412px', height: quality === 'desktop' ? '1024px' : '915px' });
+        document.body.append(container);
+        let baseShipLuma = 0;
+        let activeShipLuma = 0;
+        let activeShockwaveOpacity = 0;
+        let captureActive = false;
+        const view = createRunnerView(container, {
+          forceQuality: quality,
+          createRenderer: (canvas) => {
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+            const render = renderer.render.bind(renderer);
+            renderer.render = (scene, camera) => {
+              if (quality === 'desktop' && camera.layers.mask === 4) {
+                const ship = scene.getObjectByName('airframe') as import('three').Mesh;
+                const shockwave = scene.getObjectByName('feedback-shockwave') as import('three').Mesh;
+                const shipMaterial = ship.material as import('three').MeshBasicMaterial;
+                const shockwaveMaterial = shockwave.material as import('three').MeshBasicMaterial;
+                const luma = shipMaterial.color.r + shipMaterial.color.g + shipMaterial.color.b;
+                if (captureActive) {
+                  activeShipLuma = luma;
+                  activeShockwaveOpacity = shockwaveMaterial.opacity;
+                } else {
+                  baseShipLuma = luma;
+                }
+              }
+              render(scene, camera);
+            };
+            return renderer;
+          },
+          createResizeObserver: () => undefined,
+        });
+        view.setSnapshot(createRunner(1));
+        view.render(1);
+        const bloomBaseline = view.getDiagnostics().drawCalls;
+        view.render(1.01);
+        const cachedBaseline = view.getDiagnostics().drawCalls;
+        captureActive = true;
+        view.playFeedback({ kind: 'collision' });
+        view.render(1.02);
+        const activeFirstFrame = view.getDiagnostics().drawCalls;
+        view.render(1.03);
+        const activeCachedFrame = view.getDiagnostics().drawCalls;
+        const geometries = view.getDiagnostics().geometries;
+        view.dispose();
+        return { quality, bloomBaseline, cachedBaseline, activeFirstFrame, activeCachedFrame, geometries, baseShipLuma, activeShipLuma, activeShockwaveOpacity };
+      }, { quality });
+      results.push(result);
+      await page.close();
+    }
+
+    for (const result of results) {
+      expect(result.activeFirstFrame - result.bloomBaseline, JSON.stringify(result)).toBe(2);
+      expect(result.activeCachedFrame - result.cachedBaseline, JSON.stringify(result)).toBe(result.quality === 'desktop' ? 1 : 2);
+      expect(result.activeFirstFrame, JSON.stringify(result)).toBeLessThan(60);
+      expect(result.geometries, JSON.stringify(result)).toBeLessThan(45);
+      if (result.quality === 'desktop') {
+        expect(result.activeShipLuma, JSON.stringify(result)).toBeGreaterThan(result.baseShipLuma);
+        expect(result.activeShockwaveOpacity, JSON.stringify(result)).toBeGreaterThan(0);
+      }
     }
   } finally {
     await browser.close();

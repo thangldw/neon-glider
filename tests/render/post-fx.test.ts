@@ -217,6 +217,102 @@ it('reconstructs the bounded desktop base through an edge-adaptive viewport pass
   originalDetailMaterial.dispose();
 });
 
+it('syncs live source material state into reusable desktop detail proxies', () => {
+  const renderer = rendererFixture() as RendererLike & {
+    autoClear: boolean;
+    setRenderTarget: ReturnType<typeof vi.fn>;
+  };
+  renderer.autoClear = true;
+  renderer.setRenderTarget = vi.fn();
+  const fixture = composerFixture();
+  const scene = new THREE.Scene();
+  const shipMaterial = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveIntensity: 1 });
+  const shockwaveMaterial = new THREE.MeshBasicMaterial({ color: 0xff4a24, transparent: true, opacity: 0 });
+  const ship = new THREE.Mesh(new THREE.BoxGeometry(), shipMaterial);
+  const shockwave = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 8), shockwaveMaterial);
+  ship.layers.set(2);
+  shockwave.layers.set(2);
+  scene.add(ship, shockwave);
+  const camera = new THREE.PerspectiveCamera();
+  const renderedDetails: Array<{
+    ship: THREE.MeshBasicMaterial;
+    shockwave: THREE.MeshBasicMaterial;
+    shipColor: number;
+    shockwaveColor: number;
+    shockwaveOpacity: number;
+  }> = [];
+  (renderer.render as ReturnType<typeof vi.fn>).mockImplementation((_scene, renderedCamera) => {
+    if (renderedCamera.layers.mask === 4) {
+      const detailShip = ship.material as unknown as THREE.MeshBasicMaterial;
+      const detailShockwave = shockwave.material as THREE.MeshBasicMaterial;
+      renderedDetails.push({
+        ship: detailShip,
+        shockwave: detailShockwave,
+        shipColor: detailShip.color.r,
+        shockwaveColor: detailShockwave.color.getHex(),
+        shockwaveOpacity: detailShockwave.opacity,
+      });
+    }
+  });
+  const fx = createPostFx(renderer, scene, camera, {
+    enabled: true,
+    quality: 'desktop',
+    bloomLayer: 1,
+    detailLayer: 2,
+    width: 800,
+    height: 600,
+    createComposer: () => fixture.composer,
+  });
+
+  shipMaterial.emissiveIntensity = 2;
+  shockwaveMaterial.color.setHex(0x112233);
+  shockwaveMaterial.opacity = 0.73;
+  fx.render();
+  shipMaterial.emissiveIntensity = 3;
+  shockwaveMaterial.opacity = 0.41;
+  fx.render();
+
+  expect(renderedDetails).toHaveLength(2);
+  expect(renderedDetails[0].ship).toBe(renderedDetails[1].ship);
+  expect(renderedDetails[0].shockwave).toBe(renderedDetails[1].shockwave);
+  expect(renderedDetails[0].shipColor).toBeCloseTo(1.44, 6);
+  expect(renderedDetails[1].shipColor).toBeCloseTo(2.16, 6);
+  expect(renderedDetails[0].shockwaveColor).toBe(0x112233);
+  expect(renderedDetails[0].shockwaveOpacity).toBeCloseTo(0.73, 6);
+  expect(renderedDetails[1].shockwaveOpacity).toBeCloseTo(0.41, 6);
+  fx.dispose();
+  ship.geometry.dispose();
+  shockwave.geometry.dispose();
+  shipMaterial.dispose();
+  shockwaveMaterial.dispose();
+});
+
+it('refreshes cached desktop bloom after invalidation', () => {
+  const renderer = rendererFixture() as RendererLike & {
+    autoClear: boolean;
+    setRenderTarget: ReturnType<typeof vi.fn>;
+  };
+  renderer.autoClear = true;
+  renderer.setRenderTarget = vi.fn();
+  const fixture = composerFixture();
+  const fx = createPostFx(renderer, new THREE.Scene(), new THREE.PerspectiveCamera(), {
+    enabled: true,
+    quality: 'desktop',
+    bloomLayer: 1,
+    detailLayer: 2,
+    width: 800,
+    height: 600,
+    createComposer: () => fixture.composer,
+  });
+
+  fx.render();
+  fx.invalidateBloom?.();
+  fx.render();
+
+  expect(fixture.composer.render).toHaveBeenCalledTimes(2);
+  fx.dispose();
+});
+
 it('renders directly when bloom is disabled', () => {
   const renderer = rendererFixture();
   const scene = new THREE.Scene();

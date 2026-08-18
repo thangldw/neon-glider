@@ -198,7 +198,6 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
           });
         };
         moveRenderablesToDetailLayer(ship.root);
-        moveRenderablesToDetailLayer(feedback.root);
         moveRenderablesToDetailLayer(entityField.root);
         for (const name of [
           'cyan-ribs',
@@ -220,11 +219,13 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
         'active-gate-accent',
         'crystal-entity-batch',
         'speed-streaks',
-        'feedback-particles',
-        'feedback-shockwave',
       ]) {
         scene.getObjectByName(name)?.layers.enable(BLOOM_LAYER);
       }
+      const feedbackParticles = feedback.root.getObjectByName('feedback-particles');
+      feedbackParticles?.layers.set(BLOOM_LAYER);
+      const feedbackShockwave = feedback.root.getObjectByName('feedback-shockwave');
+      feedbackShockwave?.layers.set(quality === 'desktop' ? DETAIL_LAYER : 0);
       const hemisphere = new THREE.HemisphereLight(0x74d9ff, 0x210019, 0.9);
       const key = new THREE.DirectionalLight(0xb889ff, 1.7);
       key.position.set(2.5, 7, 5);
@@ -390,6 +391,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     playFeedback(event) {
       if (disposed || contextLost) return;
       graph.feedback.play(event, effectiveReducedMotion());
+      graph.postFx.invalidateBloom?.();
     },
     setPaused(paused) {
       if (disposed || manuallyPaused === paused) return;
