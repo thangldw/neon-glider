@@ -17,6 +17,37 @@ it('preallocates one bounded particle pool and one reusable shockwave', () => {
   effects.dispose();
 });
 
+it('turns one pickup into a readable bounded cyan burst in the camera-facing plane', () => {
+  const effects = createNeonFeedbackEffects();
+  const points = effects.root.getObjectByName('feedback-particles') as THREE.Points;
+  const material = points.material as THREE.PointsMaterial;
+
+  effects.play({ kind: 'collect', count: 1 }, false);
+
+  const position = points.geometry.getAttribute('position');
+  const color = points.geometry.getAttribute('color');
+  const active = points.geometry.drawRange.count;
+  let maxAbsX = 0;
+  let maxAbsY = 0;
+  let maxAbsZ = 0;
+  for (let index = 0; index < active; index += 1) {
+    maxAbsX = Math.max(maxAbsX, Math.abs(position.getX(index)));
+    maxAbsY = Math.max(maxAbsY, Math.abs(position.getY(index)));
+    maxAbsZ = Math.max(maxAbsZ, Math.abs(position.getZ(index)));
+    expect(color.getZ(index)).toBeGreaterThan(color.getX(index));
+    expect(color.getY(index)).toBeGreaterThan(color.getX(index));
+  }
+  expect(active).toBeGreaterThanOrEqual(8);
+  expect(active).toBeLessThanOrEqual(12);
+  expect(maxAbsX).toBeGreaterThan(1.5);
+  expect(maxAbsY).toBeGreaterThan(0.7);
+  expect(maxAbsZ).toBeLessThan(0.5);
+  expect(material.size).toBeGreaterThanOrEqual(0.1);
+  expect(material.size).toBeLessThanOrEqual(0.2);
+  expect(material.depthTest).toBe(false);
+  effects.dispose();
+});
+
 it('bounds particles and disables shake under reduced motion', () => {
   const effects = createNeonFeedbackEffects();
   const camera = new THREE.PerspectiveCamera();
@@ -43,6 +74,42 @@ it('reuses attributes and disposes owned resources once', () => {
   expect(geometryDispose).toHaveBeenCalledOnce();
 });
 
+it('reuses every owned resource through playback and disposes each exactly once', () => {
+  const effects = createNeonFeedbackEffects();
+  const particles = effects.root.getObjectByName('feedback-particles') as THREE.Points;
+  const shockwave = effects.root.getObjectByName('feedback-shockwave') as THREE.Mesh;
+  const resources = [
+    particles.geometry,
+    particles.material as THREE.Material,
+    shockwave.geometry,
+    shockwave.material as THREE.Material,
+  ] as const;
+  const disposals = resources.map((resource) => vi.spyOn(resource, 'dispose'));
+  const position = particles.geometry.getAttribute('position');
+  const color = particles.geometry.getAttribute('color');
+  const positionArray = position.array;
+  const colorArray = color.array;
+  const children = [...effects.root.children];
+  const camera = new THREE.PerspectiveCamera();
+
+  effects.play({ kind: 'collect', count: 1 }, false);
+  effects.update(0.05, false);
+  effects.play({ kind: 'collision' }, false);
+  effects.update(0.05, false);
+  effects.applyCameraShake(camera, false);
+
+  expect(effects.root.children).toEqual(children);
+  expect(particles.geometry.getAttribute('position')).toBe(position);
+  expect(particles.geometry.getAttribute('color')).toBe(color);
+  expect(position.array).toBe(positionArray);
+  expect(color.array).toBe(colorArray);
+  expect([particles.geometry, particles.material, shockwave.geometry, shockwave.material]).toEqual(resources);
+
+  effects.dispose();
+  effects.dispose();
+  for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce();
+});
+
 it('animates collection particles inward and collision feedback outward', () => {
   const effects = createNeonFeedbackEffects();
   const points = effects.root.getObjectByName('feedback-particles') as THREE.Points;
@@ -50,20 +117,23 @@ it('animates collection particles inward and collision feedback outward', () => 
 
   effects.play({ kind: 'collect', count: 99 }, false);
   const initialRadius = Math.hypot(
-    points.geometry.getAttribute('position').getX(0),
-    points.geometry.getAttribute('position').getZ(0),
+    points.geometry.getAttribute('position').getX(1),
+    points.geometry.getAttribute('position').getY(1) / 0.58,
   );
   effects.update(0.1, false);
   const inwardRadius = Math.hypot(
-    points.geometry.getAttribute('position').getX(0),
-    points.geometry.getAttribute('position').getZ(0),
+    points.geometry.getAttribute('position').getX(1),
+    points.geometry.getAttribute('position').getY(1) / 0.58,
   );
   expect(points.geometry.drawRange.count).toBe(12);
   expect(inwardRadius).toBeLessThan(initialRadius);
 
   effects.play({ kind: 'collision' }, false);
   effects.update(0.1, false);
+  shockwave.geometry.computeBoundingSphere();
   expect(shockwave.visible).toBe(true);
+  expect(shockwave.geometry.boundingSphere?.radius).toBeGreaterThan(1);
+  expect((shockwave.material as THREE.MeshBasicMaterial).depthTest).toBe(false);
   expect(shockwave.scale.x).toBeGreaterThan(1);
   expect((shockwave.material as THREE.MeshBasicMaterial).opacity).toBeLessThan(0.9);
   effects.dispose();
@@ -143,9 +213,9 @@ it('preserves reduced-motion particle angular direction', () => {
   const points = effects.root.getObjectByName('feedback-particles') as THREE.Points;
   effects.play({ kind: 'collect', count: 6 }, true);
   const position = points.geometry.getAttribute('position');
-  const initialAngle = Math.atan2(position.getZ(1), position.getX(1));
+  const initialAngle = Math.atan2(position.getY(1) / 0.58, position.getX(1));
   effects.update(0.06, true);
-  const reducedAngle = Math.atan2(position.getZ(1), position.getX(1));
+  const reducedAngle = Math.atan2(position.getY(1) / 0.58, position.getX(1));
   expect(reducedAngle).toBeCloseTo(initialAngle, 6);
   effects.dispose();
 });

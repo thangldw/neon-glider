@@ -29,6 +29,8 @@ const DETAIL_LAYER = 2;
 export interface FramingDiagnostics {
   gliderNdcX: number;
   gliderNdcY: number;
+  feedbackNdcX: number;
+  feedbackNdcY: number;
   gliderBounds: {
     minX: number;
     maxX: number;
@@ -145,6 +147,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
   let lastWorldSnapshot: RunnerState | null | undefined;
   let graph: SceneGraph;
   const projectedPosition = new THREE.Vector3();
+  const feedbackProjectedPosition = new THREE.Vector3();
   const shipBoundCorners = Array.from({ length: 8 }, () => new THREE.Vector3());
   const lookTarget = new THREE.Vector3();
 
@@ -180,7 +183,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     try {
       tunnel = createNeonTunnel({ quality, materials });
       ship = createNeonShip(materials);
-      feedback = createNeonFeedbackEffects();
+      feedback = createNeonFeedbackEffects(quality === 'mobile' ? 1.6 : 1);
       feedback.root.name = 'runner-feedback-effects';
       entityField = createEntityField(materials);
       atmosphere = createNeonAtmosphere(quality, materials);
@@ -322,6 +325,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       target.ship.setLaneX(0, deltaSeconds, reducedMotion);
       target.ship.update(visualElapsedSeconds, 26, reducedMotion);
     }
+    target.feedback.root.position.copy(target.ship.root.position);
     lastWorldSnapshot = snapshot;
     target.feedback.update(deltaSeconds, reducedMotion);
     target.ship.setFeedbackPulse(target.feedback.getShipPulse());
@@ -431,6 +435,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     getFramingDiagnostics() {
       graph.camera.updateMatrixWorld(true);
       graph.ship.root.getWorldPosition(projectedPosition).project(graph.camera);
+      graph.feedback.root.getWorldPosition(feedbackProjectedPosition).project(graph.camera);
       graph.ship.root.updateWorldMatrix(true, true);
       let minX = Number.POSITIVE_INFINITY;
       let maxX = Number.NEGATIVE_INFINITY;
@@ -462,6 +467,8 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       return {
         gliderNdcX: projectedPosition.x,
         gliderNdcY: projectedPosition.y,
+        feedbackNdcX: feedbackProjectedPosition.x,
+        feedbackNdcY: feedbackProjectedPosition.y,
         gliderBounds,
         gliderVisible: minX >= -1 && maxX <= 1
           && minY >= -1 && maxY <= 1

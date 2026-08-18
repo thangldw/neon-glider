@@ -42,6 +42,8 @@ function runnerView(): RunnerView {
     getFramingDiagnostics: () => ({
       gliderNdcX: 0,
       gliderNdcY: 0,
+      feedbackNdcX: 0,
+      feedbackNdcY: 0,
       gliderBounds: { minX: -0.2, maxX: 0.2, minY: -0.7, maxY: -0.3, minZ: 0, maxZ: 0.2 },
       gliderVisible: true,
     }),

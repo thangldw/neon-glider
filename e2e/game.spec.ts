@@ -140,6 +140,8 @@ type PreparedCollision = { seconds: number };
 type FramingSnapshot = {
   gliderNdcX: number;
   gliderNdcY: number;
+  feedbackNdcX: number;
+  feedbackNdcY: number;
   gliderBounds: Record<'minX' | 'maxX' | 'minY' | 'maxY' | 'minZ' | 'maxZ', number>;
   gliderVisible: boolean;
 };
@@ -443,7 +445,7 @@ test('production generation blocks every lane while preserving an adjacent reach
   expect(coverage.distance).toBeGreaterThanOrEqual(5_000);
 });
 
-test('keeps the full ship visible in all lanes without horizontal overflow', async ({ page }) => {
+test('keeps the full ship and feedback aligned in all lanes without horizontal overflow', async ({ page }) => {
   await startRun(page, 37);
   await expect(page.locator('.energy-track')).toBeVisible();
   await expect(page.locator('[data-distance-unit]')).toHaveText('m');
@@ -461,12 +463,14 @@ test('keeps the full ship visible in all lanes without horizontal overflow', asy
     await setLane(page, lane);
     const diagnostics = await page.evaluate(() => (
       window as typeof window & {
-        __NEON_GLIDER_E2E__?: { diagnostics(): { framing: { gliderVisible: boolean; gliderBounds: Record<string, number> } } | null };
+        __NEON_GLIDER_E2E__?: { diagnostics(): { framing: FramingSnapshot } | null };
       }
     ).__NEON_GLIDER_E2E__?.diagnostics());
     expect(diagnostics?.framing.gliderVisible).toBe(true);
     expect(diagnostics?.framing.gliderBounds.minX).toBeGreaterThanOrEqual(-1);
     expect(diagnostics?.framing.gliderBounds.maxX).toBeLessThanOrEqual(1);
+    expect(diagnostics?.framing.feedbackNdcX).toBeCloseTo(diagnostics?.framing.gliderNdcX ?? Number.NaN, 6);
+    expect(diagnostics?.framing.feedbackNdcY).toBeCloseTo(diagnostics?.framing.gliderNdcY ?? Number.NaN, 6);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     await page.evaluate(() => document.documentElement.clientWidth),

@@ -10,6 +10,7 @@ export const REDUCED_FEEDBACK_MS = 120;
 
 const MAX_PARTICLES = 20;
 const COLLECTION_PARTICLES = 12;
+const COLLECTION_BASE_PARTICLES = 10;
 const REDUCED_COLLECTION_PARTICLES = 6;
 const REDUCED_COLLISION_PARTICLES = 8;
 const TAU = Math.PI * 2;
@@ -30,7 +31,10 @@ export function feedbackDurationMs(event: RunnerFeedback, reducedMotion: boolean
   return event.kind === 'collision' ? COLLISION_FEEDBACK_MS : COLLECTION_FEEDBACK_MS;
 }
 
-export function createNeonFeedbackEffects(): NeonFeedbackEffects {
+export function createNeonFeedbackEffects(particleSizeScale = 1): NeonFeedbackEffects {
+  const sizeScale = Number.isFinite(particleSizeScale)
+    ? THREE.MathUtils.clamp(particleSizeScale, 0.5, 2.5)
+    : 1;
   const positions = new Float32Array(MAX_PARTICLES * 3);
   const colors = new Float32Array(MAX_PARTICLES * 3);
   const radii = new Float32Array(MAX_PARTICLES);
@@ -39,9 +43,9 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
 
   for (let index = 0; index < MAX_PARTICLES; index += 1) {
     const angle = (index / MAX_PARTICLES) * TAU;
-    radii[index] = 0.32 + (index % 5) * 0.12;
+    radii[index] = 2.4 + (index % 5) * 0.3;
     angles[index] = angle;
-    heights[index] = ((index % 4) - 1.5) * 0.11;
+    heights[index] = ((index % 4) - 1.5) * 0.075;
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -54,10 +58,11 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
   geometry.setDrawRange(0, 0);
 
   const particleMaterial = new THREE.PointsMaterial({
-    size: 0.14,
+    size: 0.17 * sizeScale,
     vertexColors: true,
     transparent: true,
     opacity: 0,
+    depthTest: false,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
@@ -67,11 +72,12 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
   particles.frustumCulled = false;
   particles.visible = false;
 
-  const shockwaveGeometry = new THREE.RingGeometry(0.42, 0.48, 32);
+  const shockwaveGeometry = new THREE.RingGeometry(1.1, 1.24, 32);
   const shockwaveMaterial = new THREE.MeshBasicMaterial({
     color: 0xff4a24,
     transparent: true,
     opacity: 0,
+    depthTest: false,
     depthWrite: false,
     side: THREE.FrontSide,
     blending: THREE.AdditiveBlending,
@@ -79,6 +85,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
   });
   const shockwave = new THREE.Mesh(shockwaveGeometry, shockwaveMaterial);
   shockwave.name = 'feedback-shockwave';
+  shockwave.position.z = 0.2;
   shockwave.visible = false;
 
   const root = new THREE.Group();
@@ -130,33 +137,36 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
       activeEvent = event;
       elapsedSeconds = 0;
       durationMs = feedbackDurationMs(event, reducedMotion);
-      activeParticleCount = event.kind === 'collision'
-        ? (reducedMotion ? REDUCED_COLLISION_PARTICLES : MAX_PARTICLES)
-        : Math.min(
-            reducedMotion ? REDUCED_COLLECTION_PARTICLES : COLLECTION_PARTICLES,
-            Math.max(0, Number.isFinite(event.count) ? Math.floor(event.count) : 0),
-          );
+      if (event.kind === 'collision') {
+        activeParticleCount = reducedMotion ? REDUCED_COLLISION_PARTICLES : MAX_PARTICLES;
+      } else {
+        const requested = Math.max(0, Number.isFinite(event.count) ? Math.floor(event.count) : 0);
+        const cap = reducedMotion ? REDUCED_COLLECTION_PARTICLES : COLLECTION_PARTICLES;
+        const base = reducedMotion ? REDUCED_COLLECTION_PARTICLES : COLLECTION_BASE_PARTICLES;
+        activeParticleCount = requested === 0 ? 0 : Math.min(cap, base + (requested - 1) * 2);
+      }
 
       const isCollision = event.kind === 'collision';
-      const red = 1;
-      const green = isCollision ? 0.16 : 0.82;
-      const blue = isCollision ? 0.025 : 1;
       for (let index = 0; index < MAX_PARTICLES; index += 1) {
         const offset = index * 3;
-        const angle = angles[index];
+        const angle = activeParticleCount > 0 && index < activeParticleCount
+          ? (index / activeParticleCount) * TAU
+          : angles[index];
+        angles[index] = angle;
         const radius = radii[index];
         positions[offset] = Math.cos(angle) * radius;
-        positions[offset + 1] = heights[index];
-        positions[offset + 2] = Math.sin(angle) * radius;
-        colors[offset] = red;
-        colors[offset + 1] = green;
-        colors[offset + 2] = blue;
+        positions[offset + 1] = Math.sin(angle) * radius * 0.58;
+        positions[offset + 2] = 0.3 + heights[index];
+        colors[offset] = isCollision ? 1 : 0.04 + (index % 3) * 0.035;
+        colors[offset + 1] = isCollision ? 0.78 + (index % 3) * 0.06 : 0.78 + (index % 3) * 0.08;
+        colors[offset + 2] = isCollision ? 0.015 + (index % 2) * 0.025 : 1;
       }
       positionAttribute.needsUpdate = true;
       colorAttribute.needsUpdate = true;
       geometry.setDrawRange(0, activeParticleCount);
       particles.visible = activeParticleCount > 0;
-      particleMaterial.opacity = isCollision ? 0.95 : 0.85;
+      particleMaterial.size = (isCollision ? 0.14 : 0.17) * sizeScale;
+      particleMaterial.opacity = 1;
       shockwave.visible = isCollision;
       shockwave.scale.set(1, 1, 1);
       shockwaveMaterial.opacity = isCollision ? 0.9 : 0;
@@ -179,14 +189,14 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
       const progress = durationSeconds > 0 ? elapsedSeconds / durationSeconds : 1;
       const isCollision = activeEvent.kind === 'collision';
       const fade = 1 - progress;
-      particleMaterial.opacity = (isCollision ? 0.95 : 0.85) * fade;
+      particleMaterial.opacity = Math.sqrt(fade);
       for (let index = 0; index < activeParticleCount; index += 1) {
         const offset = index * 3;
         const angle = angles[index] + (reducedMotion ? 0 : progress * (isCollision ? 0.9 : 3.2));
         const radius = isCollision ? radii[index] * (1 + progress * 2.5) : radii[index] * (1 - progress);
         positions[offset] = Math.cos(angle) * radius;
-        positions[offset + 1] = heights[index] * (isCollision ? 1 + progress : 1 - progress * 0.4);
-        positions[offset + 2] = Math.sin(angle) * radius;
+        positions[offset + 1] = Math.sin(angle) * radius * (isCollision ? 0.5 : 0.58);
+        positions[offset + 2] = 0.3 + heights[index] * (isCollision ? 1 + progress : 1 - progress * 0.4);
       }
       positionAttribute.needsUpdate = true;
 

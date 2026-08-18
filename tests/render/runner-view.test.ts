@@ -243,6 +243,33 @@ it('attaches feedback to the ship anchor and exposes explicit playback', () => {
   view.dispose();
 });
 
+it('tracks the rendered ship position without inheriting its bank', () => {
+  const renderer = rendererFixture();
+  const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
+  view.setSnapshot({ ...createRunner(4), lane: 2 });
+  view.render(1);
+  view.render(1.1);
+
+  const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as THREE.Scene;
+  const ship = scene.getObjectByName('neon-ship') as THREE.Group;
+  const feedback = scene.getObjectByName('runner-feedback-effects') as THREE.Group;
+  const shipWorld = ship.getWorldPosition(new THREE.Vector3());
+  const feedbackWorld = feedback.getWorldPosition(new THREE.Vector3());
+  expect(ship.rotation.z).not.toBe(0);
+  expect(feedback.rotation.z).toBe(0);
+  expect(feedback.position.x).toBeCloseTo(ship.position.x, 10);
+  expect(feedback.position.y).toBeCloseTo(ship.position.y, 10);
+  expect(feedbackWorld.x).toBeCloseTo(shipWorld.x, 10);
+  expect(feedbackWorld.y).toBeCloseTo(shipWorld.y, 10);
+  const framing = view.getFramingDiagnostics() as ReturnType<typeof view.getFramingDiagnostics> & {
+    feedbackNdcX?: number;
+    feedbackNdcY?: number;
+  };
+  expect(framing.feedbackNdcX).toBeCloseTo(framing.gliderNdcX, 10);
+  expect(framing.feedbackNdcY).toBeCloseTo(framing.gliderNdcY, 10);
+  view.dispose();
+});
+
 it('does not infer feedback from ordinary snapshot replacement', () => {
   const renderer = rendererFixture();
   const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
@@ -341,11 +368,11 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
         gliderBounds: { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number };
       };
     }> = [];
-    for (const [width, height, quality] of [
-      [1536, 1024, 'desktop'],
-      [412, 915, 'mobile'],
+    for (const [width, height, deviceScaleFactor, quality] of [
+      [1536, 1024, 1, 'desktop'],
+      [412, 839, 2.625, 'mobile'],
     ] as const) {
-      const page = await browser.newPage({ viewport: { width, height } });
+      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
       await page.goto(`http://127.0.0.1:${address.port}/__runner-view-test.html`);
       const viewportResults = await page.evaluate(async ({ width, height, quality }) => {
         const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<Record<string, unknown>>;
@@ -538,6 +565,179 @@ it('keeps production-composer feedback within two complete-frame submissions', a
   }
 }, 20_000);
 
+it('renders mutation-sensitive cyan and red-orange particle pixels through the production composer', async () => {
+  const server = await createServer({
+    configFile: false,
+    root: process.cwd(),
+    logLevel: 'silent',
+    server: { host: '127.0.0.1', port: 0 },
+    plugins: [{
+      name: 'runner-feedback-pixel-test-page',
+      configureServer(vite) {
+        vite.middlewares.use('/__runner-feedback-pixels.html', (_request, response) => {
+          response.statusCode = 200;
+          response.setHeader('Content-Type', 'text/html');
+          response.end('<!doctype html><html><head><script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js"}}</script></head><body></body></html>');
+        });
+      },
+    }],
+  });
+  await server.listen();
+  const address = server.httpServer?.address() as AddressInfo;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const results = [];
+    for (const [width, height, deviceScaleFactor, quality] of [
+      [1536, 1024, 1, 'desktop'],
+      [412, 839, 2.625, 'mobile'],
+    ] as const) {
+      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
+      await page.goto(`http://127.0.0.1:${address.port}/__runner-feedback-pixels.html`);
+      results.push(await page.evaluate(async ({ width, height, quality }) => {
+        const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<Record<string, unknown>>;
+        const [three, viewModule, runnerModule] = await Promise.all([
+          dynamicImport('three'),
+          dynamicImport('/src/render/runner-view.ts'),
+          dynamicImport('/src/simulation/runner.ts'),
+        ]);
+        const THREE = three as typeof import('three');
+        const createRunnerView = viewModule.createRunnerView as typeof import('../../src/render/runner-view').createRunnerView;
+        const createRunner = runnerModule.createRunner as typeof import('../../src/simulation/runner').createRunner;
+        const container = document.createElement('div');
+        Object.assign(container.style, { width: `${width}px`, height: `${height}px` });
+        document.body.append(container);
+        let renderedScene: import('three').Scene | undefined;
+        let renderedCamera: import('three').Camera | undefined;
+        let canvas: HTMLCanvasElement | undefined;
+        const view = createRunnerView(container, {
+          forceQuality: quality,
+          reducedMotion: true,
+          createRenderer: (targetCanvas) => {
+            canvas = targetCanvas;
+            const renderer = new THREE.WebGLRenderer({ canvas: targetCanvas, antialias: true, preserveDrawingBuffer: true });
+            const render = renderer.render.bind(renderer);
+            renderer.render = (scene, camera) => {
+              if (scene.getObjectByName('neon-ship-anchor')) {
+                renderedScene = scene as import('three').Scene;
+                renderedCamera = camera;
+              }
+              render(scene, camera);
+            };
+            return renderer;
+          },
+          createResizeObserver: () => undefined,
+        });
+
+        const readPixels = (kind: 'cyan' | 'orange') => {
+          if (!canvas || !renderedScene || !renderedCamera) throw new Error('Missing production render state');
+          const copy = document.createElement('canvas');
+          copy.width = canvas.width;
+          copy.height = canvas.height;
+          const context = copy.getContext('2d', { willReadFrequently: true });
+          if (!context) throw new Error('Missing pixel context');
+          context.drawImage(canvas, 0, 0);
+          const data = context.getImageData(0, 0, copy.width, copy.height).data;
+          const center = renderedScene.getObjectByName('runner-feedback-effects')!.getWorldPosition(new THREE.Vector3()).project(renderedCamera);
+          const centerX = (center.x + 1) * 0.5 * copy.width;
+          const centerY = (1 - center.y) * 0.5 * copy.height;
+          let pixels = 0;
+          let sectors = 0;
+          let nonBlack = 0;
+          let maxRed = 0;
+          let maxGreen = 0;
+          let maxBlue = 0;
+          for (let y = 0; y < copy.height; y += 1) {
+            for (let x = 0; x < copy.width; x += 1) {
+              const offset = (y * copy.width + x) * 4;
+              const red = data[offset];
+              const green = data[offset + 1];
+              const blue = data[offset + 2];
+              if (red + green + blue > 24) nonBlack += 1;
+              maxRed = Math.max(maxRed, red);
+              maxGreen = Math.max(maxGreen, green);
+              maxBlue = Math.max(maxBlue, blue);
+              const colored = kind === 'cyan'
+                ? blue >= 48 && green >= 36 && blue > red * 1.35 && green > red * 1.2
+                : red >= 36 && red > green * 1.005 && red > blue * 1.8;
+              if (!colored) continue;
+              const dx = x - centerX;
+              const dy = y - centerY;
+              const radius = Math.hypot(dx, dy);
+              if (radius < 8 || radius > Math.min(copy.width, copy.height) * 0.32) continue;
+              pixels += 1;
+              const sector = Math.floor(((Math.atan2(dy, dx) + Math.PI) / (Math.PI * 2)) * 8) % 8;
+              sectors |= 1 << sector;
+            }
+          }
+          let sectorCount = 0;
+          for (let index = 0; index < 8; index += 1) sectorCount += (sectors >> index) & 1;
+          return { pixels, sectorCount, nonBlack, maxRed, maxGreen, maxBlue };
+        };
+
+        view.setSnapshot({ ...createRunner(1), lane: 2 });
+        view.render(1);
+        const scene = renderedScene!;
+        for (const child of scene.children) child.visible = child.name === 'neon-ship-anchor';
+        scene.getObjectByName('neon-ship')!.visible = false;
+        scene.background = new THREE.Color(0x000000);
+        scene.fog = null;
+
+        view.playFeedback({ kind: 'collect', count: 1 });
+        view.render(1.02);
+        const collect = readPixels('cyan');
+        const particles = scene.getObjectByName('feedback-particles') as import('three').Points;
+        const particleMaterial = particles.material as import('three').PointsMaterial;
+        const collectState = {
+          visible: particles.visible,
+          count: particles.geometry.drawRange.count,
+          opacity: particleMaterial.opacity,
+          size: particleMaterial.size,
+          colorWrite: particleMaterial.colorWrite,
+          root: scene.getObjectByName('runner-feedback-effects')!.position.toArray(),
+          first: (particles.geometry.getAttribute('position') as import('three').BufferAttribute).getX(0),
+        };
+        particleMaterial.colorWrite = false;
+        view.playFeedback({ kind: 'collect', count: 1 });
+        view.render(1.04);
+        const collectMuted = readPixels('cyan');
+
+        particleMaterial.colorWrite = true;
+        view.playFeedback({ kind: 'collision' });
+        scene.getObjectByName('feedback-shockwave')!.layers.disableAll();
+        view.render(1.06);
+        const collision = readPixels('orange');
+        particleMaterial.colorWrite = false;
+        view.playFeedback({ kind: 'collision' });
+        scene.getObjectByName('feedback-shockwave')!.layers.disableAll();
+        view.render(1.08);
+        const collisionMuted = readPixels('orange');
+        const diagnostics = view.getDiagnostics();
+        view.dispose();
+        return { quality, collect, collectMuted, collision, collisionMuted, collectState, diagnostics };
+      }, { width, height, quality }));
+      await page.close();
+    }
+
+    for (const result of results) {
+      const readablePixelFloor = result.quality === 'desktop' ? 5_000 : 750;
+      const readablePixelCeiling = result.quality === 'desktop' ? 20_000 : 8_000;
+      expect(result.collect.pixels, JSON.stringify(result)).toBeGreaterThan(readablePixelFloor);
+      expect(result.collect.pixels, JSON.stringify(result)).toBeLessThan(readablePixelCeiling);
+      expect(result.collect.sectorCount, JSON.stringify(result)).toBeGreaterThanOrEqual(5);
+      expect(result.collectMuted.pixels, JSON.stringify(result)).toBeLessThan(result.collect.pixels * 0.15);
+      expect(result.collision.pixels, JSON.stringify(result)).toBeGreaterThan(readablePixelFloor);
+      expect(result.collision.pixels, JSON.stringify(result)).toBeLessThan(readablePixelCeiling);
+      expect(result.collision.sectorCount, JSON.stringify(result)).toBeGreaterThanOrEqual(5);
+      expect(result.collisionMuted.pixels, JSON.stringify(result)).toBeLessThan(result.collision.pixels * 0.15);
+      expect(result.diagnostics.drawCalls, JSON.stringify(result)).toBeLessThan(60);
+      expect(result.diagnostics.geometries, JSON.stringify(result)).toBeLessThan(45);
+    }
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+}, 30_000);
+
 it('uses the release render scale by responsive quality and resizes the camera and post FX', () => {
   const descriptor = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
   Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 3 });
@@ -649,8 +849,11 @@ it('freezes visual output while lost and transactionally replays the complete la
   expect(latestScene.getObjectByName('feedback-particles')?.visible).toBe(false);
   const field = latestScene.getObjectByName('entity-field')!;
   const ship = latestScene.getObjectByName('neon-ship')!;
+  const feedback = latestScene.getObjectByName('runner-feedback-effects')!;
   const gate = latestScene.getObjectByName('active-gate')!;
   expect(ship.position.x).toBe(3);
+  expect(feedback.position.x).toBe(ship.position.x);
+  expect(feedback.position.y).toBe(ship.position.y);
   expect(gate.position.z).toBe(-(500 - snapshot.distance) - 1);
   for (const entity of snapshot.entities) {
     const marker = field.getObjectByName(entity.id);
