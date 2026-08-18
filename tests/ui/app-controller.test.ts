@@ -90,6 +90,32 @@ function start(app: ReturnType<typeof createAppController>) {
   expect(app.getState().screen).toBe('playing');
 }
 
+function feedbackRun(options: {
+  kind?: 'crystal' | 'cube';
+  reducedMotion?: boolean;
+  energy?: number;
+} = {}) {
+  const run = createRunner(5, options.reducedMotion ?? false);
+  return {
+    ...run,
+    energy: options.energy ?? 50,
+    entities: options.kind ? [{
+      id: `feedback-${options.kind}`,
+      kind: options.kind,
+      lane: 1 as const,
+      distance: 1,
+      segment: 0,
+    }] : [],
+  };
+}
+
+function finishRestoredCountdown(app: ReturnType<typeof createAppController>) {
+  expect(app.getState().screen).toBe('countdown');
+  vi.advanceTimersByTime(3_000);
+  vi.runAllTicks();
+  expect(app.getState().screen).toBe('playing');
+}
+
 describe('runner lifecycle', () => {
   it('idempotently tears down an active countdown, frame, actions, view, monitor, and visibility listener', () => {
     vi.useFakeTimers();
@@ -422,6 +448,179 @@ describe('runner lifecycle', () => {
     expect(app.getState().screen).toBe('result');
     app.destroy();
   });
+});
+
+describe('gameplay feedback sequencing', () => {
+  it('emits one collection event only for a crystal-count increase', () => {
+    vi.useFakeTimers();
+    const view = runnerView();
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'crystal' }),
+      createRunnerView: () => view,
+    }));
+    finishRestoredCountdown(app);
+
+    app.test!.advance(0.1);
+    app.test!.advance(0.1);
+
+    expect(view.playFeedback).toHaveBeenCalledOnce();
+    expect(view.playFeedback).toHaveBeenCalledWith({ kind: 'collect', count: 1 });
+    expect(root.querySelector('[data-energy-bar]')?.classList).toContain('is-energy-pulse');
+    app.destroy();
+  });
+
+  it.each([
+    { reducedMotion: false, delayMs: 320 },
+    { reducedMotion: true, delayMs: 120 },
+  ])('holds a $delayMs ms collision impact before result when reducedMotion=$reducedMotion', ({ reducedMotion, delayMs }) => {
+    vi.useFakeTimers();
+    const view = runnerView();
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'cube', reducedMotion }),
+      createRunnerView: () => view,
+    }));
+    finishRestoredCountdown(app);
+    const collisionFeedback = root.querySelector<HTMLElement>('[data-game-feedback]')!;
+    const feedbackReflow = vi.fn(() => 0);
+    Object.defineProperty(collisionFeedback, 'offsetWidth', { configurable: true, get: feedbackReflow });
+
+    app.test!.advance(0.1);
+
+    expect(app.getState()).toMatchObject({
+      screen: 'playing',
+      run: { status: 'complete', endReason: 'collision', lane: 1 },
+    });
+    expect(view.playFeedback).toHaveBeenCalledOnce();
+    expect(view.playFeedback).toHaveBeenCalledWith({ kind: 'collision' });
+    expect(collisionFeedback.classList).toContain('is-collision-flash');
+    expect(feedbackReflow).toHaveBeenCalledOnce();
+
+    app.test!.setLane(2);
+    root.querySelector<HTMLButtonElement>('[data-action="pause"]')!.click();
+    expect(app.getState()).toMatchObject({ screen: 'playing', run: { lane: 1, status: 'complete' } });
+
+    vi.advanceTimersByTime(delayMs - 1);
+    expect(app.getState().screen).toBe('playing');
+    vi.advanceTimersByTime(1);
+    expect(app.getState()).toMatchObject({ screen: 'result', run: { endReason: 'collision' } });
+    expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    app.destroy();
+  });
+
+  it('finishes depletion immediately without collision feedback', () => {
+    vi.useFakeTimers();
+    const view = runnerView();
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ energy: 0.1 }),
+      createRunnerView: () => view,
+    }));
+    finishRestoredCountdown(app);
+
+    app.test!.advance(0.1);
+
+    expect(app.getState()).toMatchObject({ screen: 'result', run: { status: 'complete', endReason: 'depleted' } });
+    expect(view.playFeedback).not.toHaveBeenCalled();
+    expect(root.querySelector('#result-title')?.textContent).toBe('CẠN NĂNG LƯỢNG');
+    app.destroy();
+  });
+
+  it('cancels a pending collision completion when destroyed', () => {
+    vi.useFakeTimers();
+    const saveProfile = vi.fn(() => true);
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'cube' }),
+      saveProfile,
+    }));
+    finishRestoredCountdown(app);
+    const timerCountBeforeImpact = vi.getTimerCount();
+    app.test!.advance(0.1);
+    expect(vi.getTimerCount()).toBe(timerCountBeforeImpact + 1);
+
+    app.destroy();
+    expect(vi.getTimerCount()).toBe(timerCountBeforeImpact);
+    vi.advanceTimersByTime(1_000);
+
+    expect(saveProfile).not.toHaveBeenCalled();
+    expect(app.getState()).toMatchObject({ screen: 'playing', run: { endReason: 'collision' } });
+  });
+
+  it('forceEnd finalizes a pending collision once and clears its timer before menu teardown', () => {
+    vi.useFakeTimers();
+    const saveProfile = vi.fn(() => true);
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'cube' }),
+      saveProfile,
+    }));
+    finishRestoredCountdown(app);
+    const timerCountBeforeImpact = vi.getTimerCount();
+    app.test!.advance(0.1);
+
+    app.test!.forceEnd('collision');
+    vi.runAllTicks();
+    expect(app.getState().screen).toBe('result');
+    expect(vi.getTimerCount()).toBe(timerCountBeforeImpact);
+    root.querySelector<HTMLButtonElement>('[data-action="menu"]')!.click();
+
+    expect(app.getState().screen).toBe('menu');
+    expect(saveProfile).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(timerCountBeforeImpact);
+    app.destroy();
+  });
+
+  it('finishes a pending collision immediately when the page becomes hidden', () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const saveProfile = vi.fn(() => true);
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'cube' }),
+      saveProfile,
+    }));
+    finishRestoredCountdown(app);
+    app.test!.advance(0.1);
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(app.getState()).toMatchObject({
+      screen: 'result',
+      run: { status: 'complete', endReason: 'collision' },
+      profile: { runCount: 1 },
+    });
+    expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    vi.advanceTimersByTime(1_000);
+    expect(saveProfile).toHaveBeenCalledOnce();
+    app.destroy();
+  });
+
+  it('finishes a pending collision immediately when WebGL context is lost', () => {
+    vi.useFakeTimers();
+    let options: Parameters<NonNullable<AppControllerDependencies['createRunnerView']>>[1];
+    const saveProfile = vi.fn(() => true);
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'cube' }),
+      saveProfile,
+      createRunnerView: (_container, nextOptions) => {
+        options = nextOptions;
+        return runnerView();
+      },
+    }));
+    finishRestoredCountdown(app);
+    app.test!.advance(0.1);
+
+    options!.onContextLost?.();
+
+    expect(app.getState()).toMatchObject({
+      screen: 'result',
+      run: { status: 'complete', endReason: 'collision' },
+      profile: { runCount: 1 },
+    });
+    expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    vi.advanceTimersByTime(1_000);
+    expect(saveProfile).toHaveBeenCalledOnce();
+    app.destroy();
+  });
+
 });
 
 describe('test API', () => {

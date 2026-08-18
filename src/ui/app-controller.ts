@@ -9,6 +9,7 @@ import {
   type RunnerView,
   type RunnerViewOptions,
 } from '../render/runner-view';
+import { feedbackDurationMs } from '../render/neon/feedback-effects';
 import {
   clearRunner as clearStoredRunner,
   loadRunner as loadStoredRunner,
@@ -181,6 +182,7 @@ export function createAppController(
   let unbindActions: (() => void) | null = null;
   let frameHandle: number | null = null;
   let countdownTimer: ReturnType<typeof setInterval> | null = null;
+  let completionTimer: ReturnType<typeof setTimeout> | null = null;
   let checkpointAccumulator = 0;
   let storageUnavailable = false;
   let completionRecorded = false;
@@ -205,12 +207,18 @@ export function createAppController(
     countdownTimer = null;
   };
 
+  const clearCompletion = () => {
+    if (completionTimer !== null) clearTimeout(completionTimer);
+    completionTimer = null;
+  };
+
   const saveCheckpoint = () => {
     if (run && run.status !== 'complete' && !saveRunner(run, showStorageWarning)) showStorageWarning();
   };
 
   const stopGameplay = () => {
     clearCountdown();
+    clearCompletion();
     frameClock.reset();
     checkpointAccumulator = 0;
     if (frameHandle !== null) cancelFrame(frameHandle);
@@ -286,16 +294,35 @@ export function createAppController(
   };
 
   const applyAdvance = (delta: number) => {
-    if (!run || screen !== 'playing' || delta <= 0) return;
-    run = advanceRunner(run, delta);
+    if (!run || run.status !== 'playing' || screen !== 'playing' || delta <= 0) return;
+    const previous = run;
+    const next = advanceRunner(previous, delta);
+    run = next;
     view?.setSnapshot(run);
     gameScreen?.update(run);
+    const collected = next.crystals - previous.crystals;
+    if (collected > 0) {
+      view?.playFeedback({ kind: 'collect', count: collected });
+      gameScreen?.playFeedback('collect');
+    }
     checkpointAccumulator += delta;
     if (checkpointAccumulator >= 0.5) {
       checkpointAccumulator %= 0.5;
       saveCheckpoint();
     }
-    if (run.status === 'complete') finishRun();
+    if (next.status !== 'complete') return;
+    if (next.endReason !== 'collision') {
+      finishRun();
+      return;
+    }
+    view?.playFeedback({ kind: 'collision' });
+    gameScreen?.playFeedback('collision');
+    if (completionTimer === null) {
+      completionTimer = setTimeout(() => {
+        completionTimer = null;
+        finishRun();
+      }, feedbackDurationMs({ kind: 'collision' }, next.reducedMotion));
+    }
   };
 
   const renderFrame: FrameRequestCallback = (timestamp) => {
@@ -308,7 +335,7 @@ export function createAppController(
   };
 
   const moveToLane = (lane: Lane) => {
-    if (!run || screen !== 'playing') return;
+    if (!run || run.status !== 'playing' || screen !== 'playing') return;
     let next = run;
     while (next.lane !== lane) next = moveRunnerLane(next, lane < next.lane ? -1 : 1);
     if (next === run) return;
@@ -320,7 +347,7 @@ export function createAppController(
   };
 
   const move = (direction: -1 | 1) => {
-    if (!run || screen !== 'playing') return;
+    if (!run || run.status !== 'playing' || screen !== 'playing') return;
     const next = moveRunnerLane(run, direction);
     if (next === run) return;
     run = next;
@@ -336,7 +363,7 @@ export function createAppController(
   };
 
   const pauseRun = (message = 'Lượt chơi đang tạm dừng.', wantsResume = false) => {
-    if (!run || !gameScreen || (screen !== 'playing' && screen !== 'countdown' && screen !== 'paused')) return;
+    if (!run || run.status === 'complete' || !gameScreen || (screen !== 'playing' && screen !== 'countdown' && screen !== 'paused')) return;
     clearCountdown();
     resumeRequested = wantsResume;
     run = { ...run, status: 'paused', endReason: null };
@@ -415,6 +442,10 @@ export function createAppController(
         reducedMotion: run.reducedMotion,
         onContextLost: () => {
           if (!view || !run || !gameScreen) return;
+          if (run.status === 'complete' && run.endReason === 'collision') {
+            finishRun();
+            return;
+          }
           contextSuspended = true;
           pauseRun('Kết nối đồ họa bị gián đoạn.', screen === 'playing' || screen === 'countdown' || resumeRequested);
         },
@@ -470,6 +501,10 @@ export function createAppController(
 
   const onVisibilityChange = () => {
     if (document.visibilityState === 'hidden') {
+      if (run?.status === 'complete' && run.endReason === 'collision' && screen === 'playing') {
+        finishRun();
+        return;
+      }
       if (run && (screen === 'playing' || screen === 'countdown')) {
         visibilitySuspended = true;
         pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
