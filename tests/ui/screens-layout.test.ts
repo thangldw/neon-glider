@@ -47,6 +47,49 @@ it('reuses one feedback layer and restarts energy and collision classes', () => 
   expect(screen.element.querySelectorAll('[data-game-feedback]')).toHaveLength(1);
 });
 
+it('restarts repeated feedback with remove, reflow, and add on the same nodes', () => {
+  const screen = createGameScreen(vi.fn());
+  const energyBar = screen.element.querySelector<HTMLElement>('[data-energy-bar]')!;
+  const feedback = screen.element.querySelector<HTMLElement>('[data-game-feedback]')!;
+  const events: string[] = [];
+  const originalRemove = DOMTokenList.prototype.remove;
+  const originalAdd = DOMTokenList.prototype.add;
+  const removeSpy = vi.spyOn(DOMTokenList.prototype, 'remove').mockImplementation(function (this: DOMTokenList, ...tokens: string[]) {
+    if (tokens.includes('is-energy-pulse')) events.push('energy-remove');
+    if (tokens.includes('is-collision-flash')) events.push('collision-remove');
+    originalRemove.apply(this, tokens);
+  });
+  const addSpy = vi.spyOn(DOMTokenList.prototype, 'add').mockImplementation(function (this: DOMTokenList, ...tokens: string[]) {
+    if (tokens.includes('is-energy-pulse')) events.push('energy-add');
+    if (tokens.includes('is-collision-flash')) events.push('collision-add');
+    originalAdd.apply(this, tokens);
+  });
+  const reflowSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    if (this === energyBar) events.push('energy-reflow');
+    if (this === feedback) events.push('collision-reflow');
+    return 0;
+  });
+
+  screen.playFeedback('collect');
+  screen.playFeedback('collect');
+  screen.playFeedback('collision');
+  screen.playFeedback('collision');
+
+  expect(events).toEqual([
+    'energy-remove', 'energy-reflow', 'energy-add',
+    'energy-remove', 'energy-reflow', 'energy-add',
+    'collision-remove', 'collision-reflow', 'collision-add',
+    'collision-remove', 'collision-reflow', 'collision-add',
+  ]);
+  expect(screen.element.querySelectorAll('[data-game-feedback]')).toHaveLength(1);
+  expect(screen.element.querySelector('[data-game-feedback]')).toBe(feedback);
+  expect(screen.element.querySelector('[data-energy-bar]')).toBe(energyBar);
+
+  removeSpy.mockRestore();
+  addSpy.mockRestore();
+  reflowSpy.mockRestore();
+});
+
 it('keeps the menu concise and exposes one primary action', () => {
   const menu = createMenuScreen({
     profile: { schemaVersion: 1, highScore: 0, longestDistance: 0, runCount: 0, reducedMotion: false },
