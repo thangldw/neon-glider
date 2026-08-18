@@ -469,6 +469,35 @@ describe('gameplay feedback sequencing', () => {
     app.destroy();
   });
 
+  it('aggregates simultaneous crystals into one collection event and one DOM playback', () => {
+    vi.useFakeTimers();
+    const view = runnerView();
+    const run = feedbackRun({ kind: 'crystal' });
+    const app = createAppController(root, dependencies({
+      loadRunner: () => ({
+        ...run,
+        entities: [
+          run.entities[0],
+          { ...run.entities[0], id: 'feedback-crystal-2' },
+        ],
+      }),
+      createRunnerView: () => view,
+    }));
+    finishRestoredCountdown(app);
+    const energyBar = root.querySelector<HTMLElement>('[data-energy-bar]')!;
+    const feedbackReflow = vi.fn(() => 0);
+    Object.defineProperty(energyBar, 'offsetWidth', { configurable: true, get: feedbackReflow });
+
+    app.test!.advance(0.1);
+    app.test!.advance(0.1);
+
+    expect(view.playFeedback).toHaveBeenCalledOnce();
+    expect(view.playFeedback).toHaveBeenCalledWith({ kind: 'collect', count: 2 });
+    expect(energyBar.classList).toContain('is-energy-pulse');
+    expect(feedbackReflow).toHaveBeenCalledOnce();
+    app.destroy();
+  });
+
   it.each([
     { reducedMotion: false, delayMs: 320 },
     { reducedMotion: true, delayMs: 120 },
@@ -504,6 +533,43 @@ describe('gameplay feedback sequencing', () => {
     vi.advanceTimersByTime(1);
     expect(app.getState()).toMatchObject({ screen: 'result', run: { endReason: 'collision' } });
     expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    app.destroy();
+  });
+
+  it.each([
+    { reducedMotion: false, delayMs: 320 },
+    { reducedMotion: true, delayMs: 120 },
+  ])('does not replay collision feedback on RAF frames during the $delayMs ms hold', ({ reducedMotion, delayMs }) => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const view = runnerView();
+    const app = createAppController(root, dependencies({
+      loadRunner: () => feedbackRun({ kind: 'cube', reducedMotion }),
+      createRunnerView: () => view,
+      requestFrame: frames.requestFrame,
+      cancelFrame: frames.cancelFrame,
+    }));
+    finishRestoredCountdown(app);
+    const collisionFeedback = root.querySelector<HTMLElement>('[data-game-feedback]')!;
+    const feedbackReflow = vi.fn(() => 0);
+    Object.defineProperty(collisionFeedback, 'offsetWidth', { configurable: true, get: feedbackReflow });
+    const timerCountBeforeImpact = vi.getTimerCount();
+
+    frames.advance(100);
+    frames.advance(100);
+    expect(app.getState()).toMatchObject({ screen: 'playing', run: { status: 'complete', endReason: 'collision' } });
+    expect(vi.getTimerCount()).toBe(timerCountBeforeImpact + 1);
+
+    frames.advance(100);
+
+    expect(view.playFeedback).toHaveBeenCalledOnce();
+    expect(view.playFeedback).toHaveBeenCalledWith({ kind: 'collision' });
+    expect(feedbackReflow).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(timerCountBeforeImpact + 1);
+    vi.advanceTimersByTime(delayMs - 1);
+    expect(app.getState().screen).toBe('playing');
+    vi.advanceTimersByTime(1);
+    expect(app.getState().screen).toBe('result');
     app.destroy();
   });
 
