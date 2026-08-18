@@ -73,7 +73,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
     transparent: true,
     opacity: 0,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });

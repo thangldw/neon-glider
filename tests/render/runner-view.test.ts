@@ -175,8 +175,41 @@ it('moves desktop gameplay silhouettes to the full-resolution detail layer', () 
       }
     });
   }
+  for (const name of ['feedback-particles', 'feedback-shockwave']) {
+    const object = scene?.getObjectByName(name);
+    expect(object?.layers.isEnabled(2), name).toBe(true);
+    expect(object?.layers.isEnabled(0), name).toBe(false);
+    expect(object?.layers.isEnabled(1), name).toBe(true);
+  }
   expect(scene?.getObjectByName('speed-streaks')?.layers.isEnabled(0)).toBe(true);
   expect(scene?.getObjectByName('speed-streaks')?.layers.isEnabled(2)).toBe(false);
+  view.dispose();
+});
+
+it('attaches feedback to the ship anchor and exposes explicit playback', () => {
+  const renderer = rendererFixture();
+  const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
+  view.setSnapshot(createRunner(4));
+
+  view.playFeedback({ kind: 'collect', count: 1 });
+  view.render(1);
+
+  const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
+  const effects = scene.getObjectByName('runner-feedback-effects');
+  expect(effects?.parent?.name).toBe('neon-ship-anchor');
+  expect(scene.getObjectByName('feedback-particles')?.visible).toBe(true);
+  view.dispose();
+});
+
+it('does not infer feedback from ordinary snapshot replacement', () => {
+  const renderer = rendererFixture();
+  const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
+  view.setSnapshot({ ...createRunner(4), crystals: 3 });
+
+  view.render(1);
+
+  const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
+  expect(scene.getObjectByName('feedback-particles')?.visible).toBe(false);
   view.dispose();
 });
 
@@ -259,6 +292,9 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
       height: number;
       lane: number;
       sceneDrawCalls: number;
+      geometries: number;
+      activeFeedbackDrawCalls: number;
+      inactiveFeedbackDrawCalls: number;
       groupedDrawCalls: number;
       framing: {
         gliderVisible: boolean;
@@ -306,7 +342,15 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
           view.setSnapshot({ ...createRunner(1), lane });
           view.render(lane + 1);
           view.render(lane + 1);
-          const sceneDrawCalls = view.getDiagnostics().drawCalls;
+          const diagnostics = view.getDiagnostics();
+          const sceneDrawCalls = diagnostics.drawCalls;
+          view.playFeedback({ kind: 'collision' });
+          view.render(lane + 1.1);
+          const activeFeedbackDrawCalls = view.getDiagnostics().drawCalls;
+          view.render(lane + 1.2);
+          view.render(lane + 1.3);
+          view.render(lane + 1.4);
+          const inactiveFeedbackDrawCalls = view.getDiagnostics().drawCalls;
           const framing = view.getFramingDiagnostics();
           const fuselage = renderedScene?.getObjectByName('airframe') as import('three').Mesh;
           const geometry = fuselage.geometry;
@@ -317,12 +361,12 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
           geometry.addGroup(0, drawCount, 0);
           geometry.addGroup(0, drawCount, 1);
           fuselage.material = [originalMaterial, extraMaterial];
-          view.render(lane + 1);
+          view.render(lane + 1.4);
           const groupedDrawCalls = view.getDiagnostics().drawCalls;
           geometry.clearGroups();
           fuselage.material = originalMaterial;
           extraMaterial.dispose();
-          laneResults.push({ lane, sceneDrawCalls, groupedDrawCalls, framing });
+          laneResults.push({ lane, sceneDrawCalls, geometries: diagnostics.geometries, activeFeedbackDrawCalls, inactiveFeedbackDrawCalls, groupedDrawCalls, framing });
         }
         view.dispose();
         return laneResults;
@@ -337,6 +381,10 @@ it('measures actual WebGL scene submissions excluding post-FX and counts extra m
       expect(result.framing.gliderVisible, JSON.stringify(result)).toBe(true);
       expect(result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(budget);
       expect(result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(representativeCeiling);
+      expect(result.geometries, JSON.stringify(result)).toBeLessThan(45);
+      expect(result.activeFeedbackDrawCalls - result.sceneDrawCalls, JSON.stringify(result)).toBeGreaterThanOrEqual(1);
+      expect(result.activeFeedbackDrawCalls - result.sceneDrawCalls, JSON.stringify(result)).toBeLessThanOrEqual(2);
+      expect(result.inactiveFeedbackDrawCalls, JSON.stringify(result)).toBe(result.sceneDrawCalls);
       expect(result.groupedDrawCalls, JSON.stringify(result)).toBeGreaterThan(result.sceneDrawCalls);
     }
   } finally {
@@ -429,6 +477,10 @@ it('freezes visual output while lost and transactionally replays the complete la
   const canvas = renderer.domElement;
 
   const originalScene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as THREE.Scene;
+  view.playFeedback({ kind: 'collision' });
+  const originalParticles = originalScene.getObjectByName('feedback-particles') as THREE.Points;
+  const feedbackGeometryDispose = vi.spyOn(originalParticles.geometry, 'dispose');
+  expect(originalParticles.visible).toBe(true);
   const originalShipY = originalScene.getObjectByName('neon-ship')!.position.y;
   const renderCountBeforeLoss = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.length;
 
@@ -447,7 +499,9 @@ it('freezes visual output while lost and transactionally replays the complete la
   expect(onContextRestored).toHaveBeenCalledOnce();
   expect(container.querySelectorAll('canvas')).toHaveLength(1);
   expect(fxDisposals[0]).toHaveBeenCalledOnce();
+  expect(feedbackGeometryDispose).toHaveBeenCalledOnce();
   const latestScene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as THREE.Scene;
+  expect(latestScene.getObjectByName('feedback-particles')?.visible).toBe(false);
   const field = latestScene.getObjectByName('entity-field')!;
   const ship = latestScene.getObjectByName('neon-ship')!;
   const gate = latestScene.getObjectByName('active-gate')!;

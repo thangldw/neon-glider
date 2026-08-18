@@ -6,6 +6,7 @@ export interface NeonShip {
   readonly root: THREE.Group;
   setLaneX(targetX: number, deltaSeconds: number, reducedMotion: boolean): void;
   update(elapsedSeconds: number, speed: number, reducedMotion: boolean): void;
+  setFeedbackPulse(strength: number): void;
   dispose(): void;
 }
 
@@ -54,6 +55,8 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
   cockpitMaterial.emissiveIntensity = 0.92;
   cockpitMaterial.metalness = 0.7;
   cockpitMaterial.roughness = 0.16;
+  const feedbackMaterials = [shipMetal, armorMaterial, cockpitMaterial] as const;
+  const feedbackBaseEmissiveIntensities = feedbackMaterials.map((material) => material.emissiveIntensity);
 
   function own<T extends THREE.BufferGeometry>(geometry: T): T {
     geometries.add(geometry);
@@ -227,6 +230,13 @@ export function createNeonShip(materials: NeonMaterials): NeonShip {
       trailLeft.scale.set(pulse, pulse, 1 + normalizedSpeed * 0.55);
       trailRight.scale.copy(trailLeft.scale);
       exhaust.scale.setScalar(pulse);
+    },
+    setFeedbackPulse(strength) {
+      if (disposed) return;
+      const normalized = Number.isFinite(strength) ? THREE.MathUtils.clamp(strength, 0, 1) : 0;
+      for (let index = 0; index < feedbackMaterials.length; index += 1) {
+        feedbackMaterials[index].emissiveIntensity = feedbackBaseEmissiveIntensities[index] * (1 + normalized * 0.65);
+      }
     },
     dispose() {
       if (disposed) return;

@@ -35,6 +35,7 @@ function frameHarness() {
 function runnerView(): RunnerView {
   return {
     setSnapshot: vi.fn(),
+    playFeedback: vi.fn(),
     setPaused: vi.fn(),
     render: vi.fn(),
     getDiagnostics: () => ({ drawCalls: 0, geometries: 0, textures: 0 }),

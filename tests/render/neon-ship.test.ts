@@ -92,6 +92,36 @@ it('removes presentation motion when reduced motion is enabled', () => {
   materials.dispose();
 });
 
+it('pulses only cloned ship emissives and restores their exact base values at zero', () => {
+  const materials = createNeonMaterials();
+  const ship = createNeonShip(materials);
+  const ownedMaterials = ['airframe', 'armor-panels', 'cockpit-light'].map((name) => (
+    (ship.root.getObjectByName(name) as THREE.Mesh).material as THREE.MeshStandardMaterial
+  ));
+  const baseIntensities = ownedMaterials.map((material) => material.emissiveIntensity);
+  const sharedCyanIntensity = materials.cyan.emissiveIntensity;
+  const sharedMagentaIntensity = materials.magenta.emissiveIntensity;
+
+  ship.setFeedbackPulse(1);
+  const clampedIntensities = ownedMaterials.map((material) => material.emissiveIntensity);
+  ship.setFeedbackPulse(4);
+
+  for (const [index, material] of ownedMaterials.entries()) {
+    expect(material.emissiveIntensity).toBeGreaterThan(baseIntensities[index]);
+  }
+  expect(ownedMaterials.map((material) => material.emissiveIntensity)).toEqual(clampedIntensities);
+  expect(materials.cyan.emissiveIntensity).toBe(sharedCyanIntensity);
+  expect(materials.magenta.emissiveIntensity).toBe(sharedMagentaIntensity);
+
+  ship.setFeedbackPulse(-1);
+  expect(ownedMaterials.map((material) => material.emissiveIntensity)).toEqual(baseIntensities);
+  ship.setFeedbackPulse(0);
+
+  expect(ownedMaterials.map((material) => material.emissiveIntensity)).toEqual(baseIntensities);
+  ship.dispose();
+  materials.dispose();
+});
+
 it('idempotently disposes owned geometry without disposing the shared palette', () => {
   const materials = createNeonMaterials();
   const materialDispose = vi.spyOn(materials.cyan, 'dispose');

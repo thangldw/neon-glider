@@ -3,6 +3,11 @@ import type { RendererDiagnostics } from '../diagnostics/perf-overlay';
 import type { Lane, RunnerState } from '../simulation/runner-types';
 import { createNeonAtmosphere, type NeonAtmosphere } from './neon/atmosphere';
 import { createEntityField, type EntityField } from './neon/entity-field';
+import {
+  createNeonFeedbackEffects,
+  type NeonFeedbackEffects,
+  type RunnerFeedback,
+} from './neon/feedback-effects';
 import { createNeonMaterials, type NeonMaterials } from './neon/materials';
 import {
   createPostFx,
@@ -37,6 +42,7 @@ export interface FramingDiagnostics {
 
 export interface RunnerView {
   setSnapshot(snapshot: RunnerState): void;
+  playFeedback(event: RunnerFeedback): void;
   setPaused(paused: boolean): void;
   render(elapsedSeconds: number): void;
   getDiagnostics(): RendererDiagnostics;
@@ -62,6 +68,7 @@ interface SceneGraph {
   readonly tunnel: NeonTunnel;
   readonly ship: NeonShip;
   readonly shipAnchor: THREE.Group;
+  readonly feedback: NeonFeedbackEffects;
   readonly entityField: EntityField;
   readonly atmosphere: NeonAtmosphere;
   readonly postFx: PostFx;
@@ -165,12 +172,15 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     const materials = createNeonMaterials();
     let tunnel: NeonTunnel | null = null;
     let ship: NeonShip | null = null;
+    let feedback: NeonFeedbackEffects | null = null;
     let entityField: EntityField | null = null;
     let atmosphere: NeonAtmosphere | null = null;
     let postFx: PostFx | null = null;
     try {
       tunnel = createNeonTunnel({ quality, materials });
       ship = createNeonShip(materials);
+      feedback = createNeonFeedbackEffects();
+      feedback.root.name = 'runner-feedback-effects';
       entityField = createEntityField(materials);
       atmosphere = createNeonAtmosphere(quality, materials);
       const shipAnchor = new THREE.Group();
@@ -178,15 +188,17 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       shipAnchor.position.set(0, quality === 'mobile' ? -2.25 : -0.9, quality === 'mobile' ? 2.2 : -3);
       shipAnchor.scale.setScalar(quality === 'mobile' ? 0.5 : 0.75);
       shipAnchor.add(ship.root);
+      shipAnchor.add(feedback.root);
 
       scene.add(tunnel.root, entityField.root, atmosphere.root, shipAnchor);
       if (quality === 'desktop') {
         const moveRenderablesToDetailLayer = (object: THREE.Object3D): void => {
           object.traverse((descendant) => {
-            if (descendant instanceof THREE.Mesh) descendant.layers.set(DETAIL_LAYER);
+            if (descendant instanceof THREE.Mesh || descendant instanceof THREE.Points) descendant.layers.set(DETAIL_LAYER);
           });
         };
         moveRenderablesToDetailLayer(ship.root);
+        moveRenderablesToDetailLayer(feedback.root);
         moveRenderablesToDetailLayer(entityField.root);
         for (const name of [
           'cyan-ribs',
@@ -208,6 +220,8 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
         'active-gate-accent',
         'crystal-entity-batch',
         'speed-streaks',
+        'feedback-particles',
+        'feedback-shockwave',
       ]) {
         scene.getObjectByName(name)?.layers.enable(BLOOM_LAYER);
       }
@@ -245,6 +259,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
         tunnel,
         ship,
         shipAnchor,
+        feedback,
         entityField,
         atmosphere,
         postFx,
@@ -255,6 +270,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
           atmosphere?.dispose();
           entityField?.dispose();
           ship?.dispose();
+          feedback?.dispose();
           tunnel?.dispose();
           materials.dispose();
           scene.clear();
@@ -266,6 +282,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
       atmosphere?.dispose();
       entityField?.dispose();
       ship?.dispose();
+      feedback?.dispose();
       tunnel?.dispose();
       materials.dispose();
       scene.clear();
@@ -283,19 +300,24 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
   function reconcile(target: SceneGraph, deltaSeconds: number, snapLane = false): void {
     const snapshot = latestSnapshot;
     const reducedMotion = effectiveReducedMotion();
+    let distance = 0;
+    let speed = 26;
     if (snapshot) {
+      distance = snapshot.distance;
+      speed = snapshot.speed;
       target.tunnel.update(snapshot.distance, snapshot.gates + 1);
       target.entityField.sync(snapshot.entities, snapshot.distance);
       target.ship.setLaneX(LANE_X[snapshot.lane], deltaSeconds, snapLane || reducedMotion);
       target.ship.update(visualElapsedSeconds, snapshot.speed, reducedMotion);
-      target.atmosphere.update(snapshot.distance, visualElapsedSeconds, snapshot.speed, reducedMotion);
     } else {
       target.tunnel.update(0, 1);
       target.entityField.sync([], 0);
       target.ship.setLaneX(0, deltaSeconds, reducedMotion);
       target.ship.update(visualElapsedSeconds, 26, reducedMotion);
-      target.atmosphere.update(0, visualElapsedSeconds, 26, reducedMotion);
     }
+    target.feedback.update(deltaSeconds, reducedMotion);
+    target.ship.setFeedbackPulse(target.feedback.getShipPulse());
+    target.atmosphere.update(distance, visualElapsedSeconds, speed, reducedMotion);
 
     const shipX = target.ship.root.position.x * target.shipAnchor.scale.x;
     const portrait = target.camera.aspect < 0.8;
@@ -304,6 +326,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     target.camera.position.set(shipX * cameraTracking, portrait ? 1.2 : 1.45, portrait ? 10.4 : 5.2);
     lookTarget.set(shipX * lookTracking, -0.45, -20);
     target.camera.lookAt(lookTarget);
+    target.feedback.applyCameraShake(target.camera, reducedMotion);
   }
 
   function replaceGraph(quality: 'desktop' | 'mobile', width: number, height: number): void {
@@ -363,6 +386,10 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
     setSnapshot(snapshot) {
       if (disposed) return;
       latestSnapshot = cloneSnapshot(snapshot);
+    },
+    playFeedback(event) {
+      if (disposed || contextLost) return;
+      graph.feedback.play(event, effectiveReducedMotion());
     },
     setPaused(paused) {
       if (disposed || manuallyPaused === paused) return;
