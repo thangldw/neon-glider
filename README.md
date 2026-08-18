@@ -24,7 +24,7 @@ npm run test:e2e
 npm run preview -- --host 127.0.0.1 --port 4173 --base /neon-glider/
 ```
 
-Verified on 2026-08-18: 179/179 unit tests and 34/34 serial browser tests (17 desktop Chromium, 17 Pixel 7 emulation). `dist` is 4,712 KiB, below the 5 MiB release cap. Vite emits only its advisory warning for the 614.51 kB JavaScript chunk. `dist/index.html` retains relative `./assets/...` URLs for the configured `/neon-glider/` static base; source inspection and the browser static-base gate found no runtime network dependency.
+Verified on 2026-08-18: 180/180 unit tests and 34/34 serial browser tests (17 desktop Chromium, 17 Pixel 7 emulation). `dist` is below the 5 MiB release cap. Vite emits only its advisory warning for the 614.28 kB JavaScript chunk. `dist/index.html` retains relative `./assets/...` URLs for the configured `/neon-glider/` static base; source inspection and the browser static-base gate found no runtime network dependency.
 
 ## Performance evidence
 
@@ -45,4 +45,4 @@ The pinned-reference comparisons and all 26 final desktop/mobile state captures 
 
 ## GitHub Pages
 
-After pushing the `gh-pages` branch, configure **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` / `(root)`**. Deployment was not run because no remote or Pages deployment was authorized. When authorized, `npm run deploy` repeats unit, build, and browser gates through `predeploy` before publishing `dist`.
+Live: <https://thangldw.github.io/neon-glider/>. GitHub Pages deploys from `gh-pages` / `(root)` with HTTPS enforced. `npm run deploy` repeats unit, build, and browser gates through `predeploy` before publishing `dist`.
