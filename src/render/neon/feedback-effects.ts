@@ -102,6 +102,15 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
     previousShakeY = 0;
   };
 
+  const clearStoredShake = (): void => {
+    if (shakenCamera === null) return;
+    shakenCamera.position.x -= previousShakeX;
+    shakenCamera.position.y -= previousShakeY;
+    previousShakeX = 0;
+    previousShakeY = 0;
+    shakenCamera = null;
+  };
+
   const hideRenderables = (): void => {
     particles.visible = false;
     shockwave.visible = false;
@@ -117,6 +126,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
     maxParticles: MAX_PARTICLES,
     play(event, reducedMotion) {
       if (disposed) return;
+      clearStoredShake();
       activeEvent = event;
       elapsedSeconds = 0;
       durationMs = feedbackDurationMs(event, reducedMotion);
@@ -158,6 +168,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
       durationMs = feedbackDurationMs(activeEvent, reducedMotion);
       const durationSeconds = durationMs / 1000;
       if (elapsedSeconds >= durationSeconds) {
+        clearStoredShake();
         activeEvent = null;
         activeParticleCount = 0;
         elapsedSeconds = durationSeconds;
@@ -195,10 +206,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
     applyCameraShake(camera, reducedMotion) {
       if (disposed) return;
       if (shakenCamera !== null && shakenCamera !== camera) {
-        shakenCamera.position.x -= previousShakeX;
-        shakenCamera.position.y -= previousShakeY;
-        previousShakeX = 0;
-        previousShakeY = 0;
+        clearStoredShake();
       }
       clearPreviousShake(camera);
       shakenCamera = camera;
@@ -213,8 +221,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
     },
     reset() {
       if (disposed) return;
-      if (shakenCamera !== null) clearPreviousShake(shakenCamera);
-      shakenCamera = null;
+      clearStoredShake();
       activeEvent = null;
       activeParticleCount = 0;
       elapsedSeconds = 0;
@@ -224,8 +231,7 @@ export function createNeonFeedbackEffects(): NeonFeedbackEffects {
     dispose() {
       if (disposed) return;
       disposed = true;
-      if (shakenCamera !== null) clearPreviousShake(shakenCamera);
-      shakenCamera = null;
+      clearStoredShake();
       root.removeFromParent();
       root.clear();
       geometry.dispose();

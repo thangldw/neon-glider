@@ -1,17 +1,12 @@
 import * as THREE from 'three';
 import { expect, it, vi } from 'vitest';
-import {
-  COLLISION_FEEDBACK_MS,
-  COLLECTION_FEEDBACK_MS,
-  REDUCED_FEEDBACK_MS,
-  createNeonFeedbackEffects,
-  feedbackDurationMs,
-} from '../../src/render/neon/feedback-effects';
+import { createNeonFeedbackEffects, feedbackDurationMs } from '../../src/render/neon/feedback-effects';
 
 it('uses exact normal and reduced feedback durations', () => {
-  expect(feedbackDurationMs({ kind: 'collect', count: 1 }, false)).toBe(COLLECTION_FEEDBACK_MS);
-  expect(feedbackDurationMs({ kind: 'collision' }, false)).toBe(COLLISION_FEEDBACK_MS);
-  expect(feedbackDurationMs({ kind: 'collision' }, true)).toBe(REDUCED_FEEDBACK_MS);
+  expect(feedbackDurationMs({ kind: 'collect', count: 1 }, false)).toBe(250);
+  expect(feedbackDurationMs({ kind: 'collision' }, false)).toBe(320);
+  expect(feedbackDurationMs({ kind: 'collect', count: 1 }, true)).toBe(120);
+  expect(feedbackDurationMs({ kind: 'collision' }, true)).toBe(120);
 });
 
 it('preallocates one bounded particle pool and one reusable shockwave', () => {
@@ -105,5 +100,78 @@ it('only applies deterministic shake to a normal collision', () => {
   const shaken = camera.position.clone();
   effects.applyCameraShake(camera, false);
   expect(camera.position).toEqual(shaken);
+  effects.dispose();
+});
+
+it('enforces every particle cap and clears completed renderables', () => {
+  const effects = createNeonFeedbackEffects();
+  const points = effects.root.getObjectByName('feedback-particles') as THREE.Points;
+  const shockwave = effects.root.getObjectByName('feedback-shockwave') as THREE.Mesh;
+
+  effects.play({ kind: 'collect', count: 99 }, false);
+  expect(points.geometry.drawRange.count).toBe(12);
+  effects.update(0.251, false);
+  expect(points.visible).toBe(false);
+  expect(shockwave.visible).toBe(false);
+  expect(points.geometry.drawRange.count).toBe(0);
+
+  effects.play({ kind: 'collect', count: 99 }, true);
+  expect(points.geometry.drawRange.count).toBe(6);
+  effects.update(0.121, true);
+  expect(points.visible).toBe(false);
+  expect(shockwave.visible).toBe(false);
+  expect(points.geometry.drawRange.count).toBe(0);
+
+  effects.play({ kind: 'collision' }, false);
+  expect(points.geometry.drawRange.count).toBe(20);
+  effects.update(0.321, false);
+  expect(points.visible).toBe(false);
+  expect(shockwave.visible).toBe(false);
+  expect(points.geometry.drawRange.count).toBe(0);
+
+  effects.play({ kind: 'collision' }, true);
+  expect(points.geometry.drawRange.count).toBe(8);
+  effects.update(0.121, true);
+  expect(points.visible).toBe(false);
+  expect(shockwave.visible).toBe(false);
+  expect(points.geometry.drawRange.count).toBe(0);
+  effects.dispose();
+});
+
+it('preserves reduced-motion particle angular direction', () => {
+  const effects = createNeonFeedbackEffects();
+  const points = effects.root.getObjectByName('feedback-particles') as THREE.Points;
+  effects.play({ kind: 'collect', count: 6 }, true);
+  const position = points.geometry.getAttribute('position');
+  const initialAngle = Math.atan2(position.getZ(1), position.getX(1));
+  effects.update(0.06, true);
+  const reducedAngle = Math.atan2(position.getZ(1), position.getX(1));
+  expect(reducedAngle).toBeCloseTo(initialAngle, 6);
+  effects.dispose();
+});
+
+it('clears camera shake immediately when collision expires', () => {
+  const effects = createNeonFeedbackEffects();
+  const camera = new THREE.PerspectiveCamera();
+  const baseline = camera.position.clone();
+  effects.play({ kind: 'collision' }, false);
+  effects.update(0.05, false);
+  effects.applyCameraShake(camera, false);
+  expect(camera.position).not.toEqual(baseline);
+  effects.update(0.271, false);
+  expect(camera.position).toEqual(baseline);
+  effects.dispose();
+});
+
+it('clears collision shake before replacing it with collection feedback', () => {
+  const effects = createNeonFeedbackEffects();
+  const camera = new THREE.PerspectiveCamera();
+  const baseline = camera.position.clone();
+  effects.play({ kind: 'collision' }, false);
+  effects.update(0.05, false);
+  effects.applyCameraShake(camera, false);
+  expect(camera.position).not.toEqual(baseline);
+  effects.play({ kind: 'collect', count: 1 }, false);
+  expect(camera.position).toEqual(baseline);
   effects.dispose();
 });
