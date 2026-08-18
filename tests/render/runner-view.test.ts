@@ -100,6 +100,25 @@ it('builds the chase scene and mirrors snapshots without mutating simulation sta
   view.dispose();
 });
 
+it('does not re-upload static world instance buffers until the snapshot changes', () => {
+  const renderer = rendererFixture();
+  const view = createRunnerView(containerFixture(), fixtureOptions(renderer));
+  const run = createRunner(9);
+  view.setSnapshot(run);
+  view.render(1);
+  const scene = (renderer.render as ReturnType<typeof vi.fn>).mock.calls[0][0] as THREE.Scene;
+  const ribs = scene.getObjectByName('cyan-ribs') as THREE.InstancedMesh;
+  const firstVersion = ribs.instanceMatrix.version;
+
+  view.render(1.016);
+  expect(ribs.instanceMatrix.version).toBe(firstVersion);
+
+  view.setSnapshot({ ...run, distance: run.distance + 1 });
+  view.render(1.032);
+  expect(ribs.instanceMatrix.version).toBeGreaterThan(firstVersion);
+  view.dispose();
+});
+
 it('uses the bounded cinematic cyan-magenta light rig', () => {
   const renderer = rendererFixture();
   const view = createRunnerView(containerFixture(), fixtureOptions(renderer));

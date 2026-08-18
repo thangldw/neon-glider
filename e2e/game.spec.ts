@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test';
 import type { PerfEvidence } from '../src/diagnostics/perf-overlay';
 
 type Lane = 0 | 1 | 2;
@@ -25,8 +25,11 @@ type E2ESnapshot = {
   run: RunSnapshot | null;
   profile: { highScore: number; longestDistance: number; runCount: number; reducedMotion: boolean };
 };
+type MeasuredPerfEvidence = PerfEvidence & {
+  inputLatencyMs: number;
+};
 
-const artifactRoot = path.resolve('.superpowers/sdd/2026-08-17-neon-glider-visual-polish/artifacts');
+const artifactRoot = path.resolve('.superpowers/sdd/2026-08-18-neon-glider-gameplay-feedback/artifacts');
 
 function artifactDirectory(testInfo: TestInfo): string {
   return path.join(artifactRoot, testInfo.project.name);
@@ -62,7 +65,7 @@ async function startRun(page: Page, seed = 7, realTime = false): Promise<void> {
   if (!realTime) await page.clock.install({ time: new Date('2026-08-17T00:00:00Z') });
   await page.goto('?e2e=1');
   await page.getByRole('button', { name: 'Bắt đầu' }).click();
-  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-countdown]')).toHaveText('3');
   if (!realTime) await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   if (!realTime) await setSimulationFrozen(page, true);
@@ -75,6 +78,11 @@ async function setSimulationFrozen(page: Page, frozen: boolean): Promise<void> {
     if (!api) throw new Error('E2E hook unavailable');
     api.setSimulationFrozen(next);
   }, frozen);
+}
+
+async function pauseInstalledClock(page: Page): Promise<void> {
+  const currentTime = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(currentTime + 1_000);
 }
 
 async function setLane(page: Page, lane: Lane): Promise<void> {
@@ -120,10 +128,108 @@ async function advanceSafelyTo(page: Page, targetDistance: number, collectCrysta
   }, { target: targetDistance, collect: collectCrystals });
 }
 
-async function screenshot(page: Page, directory: string, name: string): Promise<void> {
+async function screenshot(page: Page, directory: string, name: string, allowAnimations = false): Promise<void> {
   await mkdir(directory, { recursive: true });
-  await page.screenshot({ path: path.join(directory, name) });
+  await page.screenshot({
+    path: path.join(directory, name),
+    animations: allowAnimations ? 'allow' : 'disabled',
+  });
 }
+
+type PreparedCollision = { seconds: number };
+type FramingSnapshot = {
+  gliderNdcX: number;
+  gliderNdcY: number;
+  gliderBounds: Record<'minX' | 'maxX' | 'minY' | 'maxY' | 'minZ' | 'maxZ', number>;
+  gliderVisible: boolean;
+};
+
+async function driveToGameplayEvent(
+  page: Page,
+  desired: 'collect' | 'collision' | 'prepare-collision',
+): Promise<E2ESnapshot | PreparedCollision> {
+  return page.evaluate((event) => {
+    const api = (window as typeof window & {
+      __NEON_GLIDER_E2E__?: {
+        snapshot(): E2ESnapshot;
+        setLane(lane: Lane): void;
+        advance(seconds: number): void;
+      };
+    }).__NEON_GLIDER_E2E__;
+    if (!api) throw new Error('E2E hook unavailable');
+    const lanes: Lane[] = [0, 1, 2];
+    const initialCrystals = api.snapshot().run?.crystals ?? 0;
+    let guard = 0;
+    while (guard < 4_000) {
+      const current = api.snapshot().run;
+      if (!current || current.status !== 'playing') break;
+      const stepDistance = current.speed * 0.25;
+      const crossing = current.entities
+        .filter((entity) => entity.distance > current.distance && entity.distance <= current.distance + stepDistance + 0.001)
+        .sort((left, right) => left.distance - right.distance);
+      const obstacle = crossing.find(({ kind }) => kind !== 'crystal');
+      const crystal = crossing.find((candidate) => (
+        candidate.kind === 'crystal'
+        && !crossing.some((entity) => (
+          entity.kind !== 'crystal'
+          && entity.lane === candidate.lane
+          && entity.distance <= candidate.distance
+        ))
+      ));
+      const target = event === 'collect' ? crystal : obstacle;
+      if (target) {
+        api.setLane(target.lane);
+        const seconds = Math.min(0.25, (target.distance - current.distance) / current.speed + 0.0001);
+        if (event === 'prepare-collision') return { seconds };
+        api.advance(seconds);
+        const next = api.snapshot();
+        if (event === 'collision' && next.run?.endReason === 'collision') return next as unknown as E2ESnapshot;
+        if (event === 'collect' && (next.run?.crystals ?? 0) > initialCrystals) return next as unknown as E2ESnapshot;
+      } else {
+        const obstacleLanes = new Set(crossing.filter(({ kind }) => kind !== 'crystal').map(({ lane }) => lane));
+        const clearLane = lanes.find((lane) => !crossing.some((entity) => entity.lane === lane));
+        api.setLane(clearLane ?? lanes.find((lane) => !obstacleLanes.has(lane)) ?? current.lane);
+        api.advance(0.25);
+      }
+      guard += 1;
+    }
+    throw new Error(`Unable to reach a real ${event} event`);
+  }, desired);
+}
+
+async function advancePreparedCollision(page: Page, prepared: PreparedCollision): Promise<E2ESnapshot> {
+  return page.evaluate((seconds) => {
+    const api = (window as typeof window & {
+      __NEON_GLIDER_E2E__?: { advance(duration: number): void; snapshot(): E2ESnapshot };
+    }).__NEON_GLIDER_E2E__;
+    if (!api) throw new Error('E2E hook unavailable');
+    api.advance(seconds);
+    return api.snapshot() as unknown as E2ESnapshot;
+  }, prepared.seconds);
+}
+
+async function framing(page: Page): Promise<FramingSnapshot> {
+  const result = await page.evaluate(() => (
+    window as typeof window & {
+      __NEON_GLIDER_E2E__?: {
+        diagnostics(): {
+          framing: {
+            gliderNdcX: number;
+            gliderNdcY: number;
+            gliderBounds: Record<'minX' | 'maxX' | 'minY' | 'maxY' | 'minZ' | 'maxZ', number>;
+            gliderVisible: boolean;
+          };
+        } | null;
+      };
+    }
+  ).__NEON_GLIDER_E2E__?.diagnostics()?.framing);
+  if (!result) throw new Error('Missing framing diagnostics');
+  return result;
+}
+
+test('records bounded real-render performance evidence', async ({ browser, page }, testInfo) => {
+  await runPerformanceEvidence(browser, page, testInfo);
+});
 
 test('keeps the production hook absent without the explicit query gate', async ({ page }) => {
   await page.goto('');
@@ -155,7 +261,7 @@ test('restores every serialized run field exactly after reload countdown', async
 
   await page.reload();
   await setSimulationFrozen(page, true);
-  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-countdown]')).toHaveText('3');
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   expect((await snapshot(page)).run).toEqual(stored);
@@ -207,7 +313,7 @@ test('pauses, resumes through countdown, and restores after a context interrupti
   await page.getByRole('button', { name: 'Tạm dừng' }).click();
   await waitForScreen(page, 'paused');
   await page.getByRole('button', { name: 'Tiếp tục' }).click();
-  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-countdown]')).toHaveText('3');
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
 
@@ -216,7 +322,7 @@ test('pauses, resumes through countdown, and restores after a context interrupti
   });
   await waitForScreen(page, 'paused');
   await page.locator('canvas').evaluate((canvas) => canvas.dispatchEvent(new Event('webglcontextrestored')));
-  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-countdown]')).toHaveText('3');
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
 });
@@ -240,7 +346,7 @@ test('holds an initially hidden run until visibility resumes', async ({ page }) 
   await page.evaluate(() => (
     window as typeof window & { __setNeonVisibility?: (state: DocumentVisibilityState) => void }
   ).__setNeonVisibility?.('visible'));
-  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-countdown]')).toHaveText('3');
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
 });
@@ -377,6 +483,90 @@ test('honors reduced motion in controller, DOM, and CSS', async ({ page }) => {
   expect(await page.locator('.energy-fill').evaluate((node) => getComputedStyle(node).transitionDuration)).toBe('0s');
 });
 
+test('gameplay feedback shows collection pulse and holds real collision impact before result', async ({ page }, testInfo) => {
+  await startRun(page, 59);
+  await pauseInstalledClock(page);
+  const beforeCrystals = (await snapshot(page)).run?.crystals ?? 0;
+  const collected = await driveToGameplayEvent(page, 'collect') as E2ESnapshot;
+  expect(collected.run?.crystals).toBeGreaterThan(beforeCrystals);
+  const energyBar = page.locator('[data-energy-bar]');
+  await expect(energyBar).toHaveClass(/is-energy-pulse/);
+  expect(await energyBar.evaluate((node) => getComputedStyle(node).animationDuration)).toBe('0.25s');
+  await page.clock.fastForward(32);
+  await expect(page.locator('.hud-left')).toBeVisible();
+  await expect(page.locator('.hud-right')).toBeVisible();
+  await expect(page.locator('.energy-hud')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => document.documentElement.clientWidth),
+  );
+  const directory = artifactDirectory(testInfo);
+  await screenshot(page, directory, 'feedback-collection.png', true);
+
+  const prepared = await driveToGameplayEvent(page, 'prepare-collision') as PreparedCollision;
+  const impact = await advancePreparedCollision(page, prepared);
+  expect(impact).toMatchObject({ screen: 'playing', run: { status: 'complete', endReason: 'collision' } });
+  const impactStyle = await page.evaluate(() => {
+    const flash = document.querySelector<HTMLElement>('[data-game-feedback]');
+    if (!flash) throw new Error('Missing collision feedback layer');
+    return {
+      active: flash.classList.contains('is-collision-flash'),
+      duration: getComputedStyle(flash, '::before').animationDuration,
+      hudVisible: ['.hud-left', '.hud-right', '.energy-hud'].every((selector) => {
+        const node = document.querySelector<HTMLElement>(selector);
+        return node !== null && getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility !== 'hidden';
+      }),
+    };
+  });
+  expect(impactStyle).toEqual({ active: true, duration: '0.32s', hudVisible: true });
+  await page.clock.fastForward(40);
+  await screenshot(page, directory, 'feedback-collision-impact.png', true);
+  expect((await snapshot(page)).screen).toBe('playing');
+  await page.clock.fastForward(279);
+  expect((await snapshot(page)).screen).toBe('playing');
+  await page.clock.fastForward(1);
+  await waitForScreen(page, 'result');
+});
+
+test('gameplay feedback uses 120 ms reduced effects without camera shake', async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await startRun(page, 61);
+  await pauseInstalledClock(page);
+  expect((await snapshot(page)).run?.reducedMotion).toBe(true);
+  await driveToGameplayEvent(page, 'collect');
+  const energyBar = page.locator('[data-energy-bar]');
+  await expect(energyBar).toHaveClass(/is-energy-pulse/);
+  expect(await energyBar.evaluate((node) => getComputedStyle(node).animationDuration)).toBe('0.12s');
+
+  const prepared = await driveToGameplayEvent(page, 'prepare-collision') as PreparedCollision;
+  await page.clock.fastForward(16);
+  const beforeImpact = await framing(page);
+  const impact = await advancePreparedCollision(page, prepared);
+  expect(impact).toMatchObject({ screen: 'playing', run: { status: 'complete', endReason: 'collision' } });
+  const impactStyle = await page.evaluate(() => {
+    const flash = document.querySelector<HTMLElement>('[data-game-feedback]');
+    if (!flash) throw new Error('Missing collision feedback layer');
+    return {
+      active: flash.classList.contains('is-collision-flash'),
+      duration: getComputedStyle(flash, '::before').animationDuration,
+    };
+  });
+  expect(impactStyle).toEqual({ active: true, duration: '0.12s' });
+  await page.clock.fastForward(16);
+  const duringImpact = await framing(page);
+  expect(duringImpact.gliderVisible).toBe(true);
+  expect(duringImpact.gliderNdcX).toBeCloseTo(beforeImpact.gliderNdcX, 10);
+  expect(duringImpact.gliderNdcY).toBeCloseTo(beforeImpact.gliderNdcY, 10);
+  for (const edge of ['minX', 'maxX', 'minY', 'maxY', 'minZ', 'maxZ'] as const) {
+    expect(duringImpact.gliderBounds[edge], edge).toBeCloseTo(beforeImpact.gliderBounds[edge], 10);
+  }
+  const directory = artifactDirectory(testInfo);
+  await screenshot(page, directory, 'feedback-reduced-collision-impact.png', true);
+  await page.clock.fastForward(103);
+  expect((await snapshot(page)).screen).toBe('playing');
+  await page.clock.fastForward(1);
+  await waitForScreen(page, 'result');
+});
+
 test('loads production assets from the static /neon-glider/ base path', async ({ page }) => {
   await page.goto('');
   expect(new URL(page.url()).pathname).toBe('/neon-glider/');
@@ -452,36 +642,80 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   });
   await waitForScreen(page, 'paused');
   await page.locator('canvas').evaluate((canvas) => canvas.dispatchEvent(new Event('webglcontextrestored')));
-  await expect(page.getByText('3', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-countdown]')).toHaveText('3');
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   await setSimulationFrozen(page, true);
   await screenshot(page, directory, 'restored-run.png');
   expect(consoleProblems).toEqual([]);
+  // Stop the final live RAF/WebGL page and let screenshot readbacks drain before the next project starts.
+  await page.goto('about:blank');
+  await page.waitForTimeout(2_000);
 });
 
-test('records bounded real-render performance evidence', async ({ browser, page }, testInfo) => {
+async function runPerformanceEvidence(browser: Browser, page: Page, testInfo: TestInfo): Promise<void> {
   await startRun(page, 43, true);
   await setSimulationFrozen(page, true);
 
-  async function measureState(state: 'normal' | 'nearGate'): Promise<PerfEvidence & { inputLatencyMs: number }> {
-    // Let screenshot readbacks and the just-applied scene state leave the GPU queue before resetting the sampled window.
-    await page.waitForTimeout(2_000);
-    const inputLatencyMs = await page.evaluate(() => new Promise<number>((resolve) => {
-      const api = (window as typeof window & {
-        __NEON_GLIDER_E2E__?: {
-          snapshot(): E2ESnapshot;
-          setLane(lane: Lane): void;
-          resetDiagnostics(): void;
-        };
-      }).__NEON_GLIDER_E2E__;
-      if (!api) throw new Error('E2E hook unavailable');
-      api.resetDiagnostics();
-      const started = performance.now();
-      api.setLane(api.snapshot().run?.lane === 2 ? 1 : 2);
-      requestAnimationFrame(() => resolve(performance.now() - started));
-    }));
-    await page.waitForTimeout(3_000);
+  async function measureState(state: 'normal' | 'nearGate'): Promise<MeasuredPerfEvidence> {
+    async function sampleWindow(): Promise<MeasuredPerfEvidence> {
+      // Let screenshot readbacks and the just-applied scene state leave the GPU queue before resetting the sampled window.
+      await page.waitForTimeout(2_000);
+      const inputLatencyMs = await page.evaluate(() => new Promise<number>((resolve) => {
+        const api = (window as typeof window & {
+          __NEON_GLIDER_E2E__?: {
+            snapshot(): E2ESnapshot;
+            setLane(lane: Lane): void;
+            resetDiagnostics(): void;
+          };
+        }).__NEON_GLIDER_E2E__;
+        if (!api) throw new Error('E2E hook unavailable');
+        api.resetDiagnostics();
+        const started = performance.now();
+        api.setLane(api.snapshot().run?.lane === 2 ? 1 : 2);
+        requestAnimationFrame(() => resolve(performance.now() - started));
+      }));
+      await page.waitForTimeout(3_000);
+      const measured = await page.evaluate(() => (
+        window as typeof window & {
+          __NEON_GLIDER_E2E__?: {
+            diagnostics(): {
+              sampleCount: number;
+              medianFrameTimeMs: number;
+              worstFrameTimeMs: number;
+              slowFrameCount: number;
+              longestSlowFrameStreak: number;
+              maxDrawCalls: number;
+              maxGeometries: number;
+              maxTextures: number;
+            } | null;
+          };
+        }
+      ).__NEON_GLIDER_E2E__?.diagnostics());
+      if (!measured) throw new Error(`Missing renderer performance diagnostics for ${state}`);
+      return {
+        project: testInfo.project.name as PerfEvidence['project'],
+        ...measured,
+        inputLatencyMs,
+      };
+    }
+
+    return sampleWindow();
+  }
+
+  async function measureFeedbackState(
+    state: 'collection' | 'collisionImpact',
+    trigger: () => Promise<unknown>,
+    sampleMs: number,
+  ): Promise<PerfEvidence & { inputLatencyMs: number }> {
+    await page.waitForTimeout(1_000);
+    await page.evaluate(() => (
+      window as typeof window & { __NEON_GLIDER_E2E__?: { resetDiagnostics(): void } }
+    ).__NEON_GLIDER_E2E__?.resetDiagnostics());
+    const started = performance.now();
+    await trigger();
+    const inputLatencyMs = performance.now() - started;
+    await page.waitForTimeout(sampleMs);
     const measured = await page.evaluate(() => (
       window as typeof window & {
         __NEON_GLIDER_E2E__?: {
@@ -499,22 +733,73 @@ test('records bounded real-render performance evidence', async ({ browser, page 
       }
     ).__NEON_GLIDER_E2E__?.diagnostics());
     if (!measured) throw new Error(`Missing renderer performance diagnostics for ${state}`);
-    const evidence: PerfEvidence & { inputLatencyMs: number } = {
+    return {
       project: testInfo.project.name as PerfEvidence['project'],
       ...measured,
       inputLatencyMs,
     };
-    return evidence;
+  }
+
+  async function measureCollisionImpact(prepared: PreparedCollision): Promise<MeasuredPerfEvidence> {
+    await page.waitForTimeout(1_000);
+    const measured = await page.evaluate((seconds) => new Promise<{
+      sampleCount: number;
+      medianFrameTimeMs: number;
+      worstFrameTimeMs: number;
+      slowFrameCount: number;
+      longestSlowFrameStreak: number;
+      maxDrawCalls: number;
+      maxGeometries: number;
+      maxTextures: number;
+      inputLatencyMs: number;
+    } | null>((resolve) => {
+      const api = (window as typeof window & {
+        __NEON_GLIDER_E2E__?: {
+          advance(duration: number): void;
+          diagnostics(): {
+            sampleCount: number;
+            medianFrameTimeMs: number;
+            worstFrameTimeMs: number;
+            slowFrameCount: number;
+            longestSlowFrameStreak: number;
+            maxDrawCalls: number;
+            maxGeometries: number;
+            maxTextures: number;
+          } | null;
+          resetDiagnostics(): void;
+        };
+      }).__NEON_GLIDER_E2E__;
+      if (!api) throw new Error('E2E hook unavailable');
+      api.resetDiagnostics();
+      const started = performance.now();
+      api.advance(seconds);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const diagnostics = api.diagnostics();
+        resolve(diagnostics ? { ...diagnostics, inputLatencyMs: performance.now() - started } : null);
+      }));
+    }), prepared.seconds);
+    if (!measured) throw new Error('Missing renderer performance diagnostics for collisionImpact');
+    return {
+      project: testInfo.project.name as PerfEvidence['project'],
+      ...measured,
+    };
   }
 
   const normal = await measureState('normal');
   await advanceSafelyTo(page, 247);
   await expect.poll(async () => (await snapshot(page)).run?.distance).toBe(247);
   const nearGate = await measureState('nearGate');
+  const collection = await measureFeedbackState(
+    'collection',
+    () => driveToGameplayEvent(page, 'collect'),
+    140,
+  );
+  const preparedCollision = await driveToGameplayEvent(page, 'prepare-collision') as PreparedCollision;
+  const collisionImpact = await measureCollisionImpact(preparedCollision);
   const viewport = page.viewportSize();
   const evidence = {
     project: testInfo.project.name,
-    states: { normal, nearGate },
+    states: { normal, nearGate, collection, collisionImpact },
     browserVersion: browser.version(),
     host: `${os.cpus()[0]?.model ?? 'unknown CPU'}; ${Math.round(os.totalmem() / 1024 ** 3)} GiB; ${os.platform()} ${os.arch()}`,
     viewport,
@@ -524,14 +809,19 @@ test('records bounded real-render performance evidence', async ({ browser, page 
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'performance.json'), `${JSON.stringify(evidence, null, 2)}\n`);
 
-  for (const [state, measured] of Object.entries({ normal, nearGate })) {
-    expect(measured.sampleCount, `${state} sample count`).toBeGreaterThan(30);
+  for (const [state, measured] of Object.entries({ normal, nearGate, collection, collisionImpact })) {
+    const inheritedState = state === 'normal' || state === 'nearGate';
+    expect(measured.sampleCount, `${state} sample count`).toBeGreaterThan(
+      inheritedState ? 30 : 0,
+    );
     expect(measured.maxDrawCalls, `${state} draw-call floor`).toBeGreaterThan(10);
     expect(measured.maxDrawCalls, `${state} draw-call cap`).toBeLessThan(
-      testInfo.project.name === 'mobile-chromium' ? 45 : 60,
+      inheritedState && testInfo.project.name === 'mobile-chromium' ? 45 : 60,
     );
     expect(measured.maxGeometries, `${state} geometry cap`).toBeLessThan(45);
-    expect(measured.longestSlowFrameStreak, `${state} slow-frame streak`).toBeLessThanOrEqual(3);
+    if (inheritedState) {
+      expect(measured.longestSlowFrameStreak, `${state} slow-frame streak`).toBeLessThanOrEqual(3);
+    }
     expect(measured.inputLatencyMs, `${state} input latency`).toBeLessThan(500);
   }
-});
+}

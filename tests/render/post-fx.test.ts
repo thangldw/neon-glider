@@ -144,7 +144,7 @@ it('uses the approved desktop Unreal bloom with scaled bloom buffers', () => {
   fx.dispose();
 });
 
-it('reconstructs the bounded desktop base through an edge-adaptive viewport pass', () => {
+it('reconstructs the bounded desktop base through a single-sample viewport pass', () => {
   const renderer = rendererFixture() as RendererLike & {
     autoClear: boolean;
     setRenderTarget: ReturnType<typeof vi.fn>;
@@ -185,6 +185,7 @@ it('reconstructs the bounded desktop base through an edge-adaptive viewport pass
   fx.render();
   fx.render();
 
+  const glow = fixture.passes[1] as import('three/examples/jsm/postprocessing/UnrealBloomPass.js').UnrealBloomPass;
   const baseTarget = renderer.setRenderTarget.mock.calls.find(([target]) => target !== null)?.[0] as
     | THREE.WebGLRenderTarget
     | undefined;
@@ -194,7 +195,15 @@ it('reconstructs the bounded desktop base through an edge-adaptive viewport pass
   const reconstruction = reconstructionCall?.[0] as THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | undefined;
   expect(baseTarget).toMatchObject({ width: 768, height: 512, samples: 0 });
   expect(reconstruction).toBeTruthy();
+  expect(reconstruction?.material.fragmentShader.match(/texture2D\(inputTexture/g)).toHaveLength(1);
+  expect(reconstruction?.material.uniforms.bloomTexture.value).toBe(glow.renderTargetsHorizontal[0].texture);
   expect(reconstruction?.material.uniforms.inputTexel.value).toMatchObject({ x: 1 / 768, y: 1 / 512 });
+  const separateBloomOverlays = (renderer.render as ReturnType<typeof vi.fn>).mock.calls.filter(([object]) => (
+    object instanceof THREE.Mesh
+      && object.geometry instanceof THREE.PlaneGeometry
+      && object.material instanceof THREE.MeshBasicMaterial
+  ));
+  expect(separateBloomOverlays).toHaveLength(0);
   expect(fixture.composer.render).toHaveBeenCalledTimes(2);
   expect(scenePasses).toEqual([
     { layerMask: 1, background: scene.background, autoClear: true },
@@ -285,6 +294,51 @@ it('syncs live source material state into reusable desktop detail proxies', () =
   shockwave.geometry.dispose();
   shipMaterial.dispose();
   shockwaveMaterial.dispose();
+});
+
+it('syncs each shared detail material proxy only once per frame', () => {
+  const renderer = rendererFixture() as RendererLike & {
+    autoClear: boolean;
+    setRenderTarget: ReturnType<typeof vi.fn>;
+  };
+  renderer.autoClear = true;
+  renderer.setRenderTarget = vi.fn();
+  const fixture = composerFixture();
+  const scene = new THREE.Scene();
+  const sharedMaterial = new THREE.MeshStandardMaterial({ color: 0x123456, emissive: 0x00cfff });
+  let opacity = sharedMaterial.opacity;
+  let opacityReads = 0;
+  Object.defineProperty(sharedMaterial, 'opacity', {
+    configurable: true,
+    get: () => {
+      opacityReads += 1;
+      return opacity;
+    },
+    set: (value: number) => { opacity = value; },
+  });
+  const first = new THREE.Mesh(new THREE.BoxGeometry(), sharedMaterial);
+  const second = new THREE.Mesh(new THREE.BoxGeometry(), sharedMaterial);
+  first.layers.set(2);
+  second.layers.set(2);
+  scene.add(first, second);
+  const fx = createPostFx(renderer, scene, new THREE.PerspectiveCamera(), {
+    enabled: true,
+    quality: 'desktop',
+    bloomLayer: 1,
+    detailLayer: 2,
+    width: 800,
+    height: 600,
+    createComposer: () => fixture.composer,
+  });
+
+  opacityReads = 0;
+  fx.render();
+
+  expect(opacityReads).toBe(1);
+  fx.dispose();
+  first.geometry.dispose();
+  second.geometry.dispose();
+  sharedMaterial.dispose();
 });
 
 it('refreshes cached desktop bloom after invalidation', () => {

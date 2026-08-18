@@ -142,6 +142,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
   let externalElapsedAnchor: number | null = null;
   let visualElapsedSeconds = 0;
   let latestSnapshot: RunnerState | null = null;
+  let lastWorldSnapshot: RunnerState | null | undefined;
   let graph: SceneGraph;
   const projectedPosition = new THREE.Vector3();
   const shipBoundCorners = Array.from({ length: 8 }, () => new THREE.Vector3());
@@ -300,22 +301,28 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
 
   function reconcile(target: SceneGraph, deltaSeconds: number, snapLane = false): void {
     const snapshot = latestSnapshot;
+    const worldChanged = snapshot !== lastWorldSnapshot;
     const reducedMotion = effectiveReducedMotion();
     let distance = 0;
     let speed = 26;
     if (snapshot) {
       distance = snapshot.distance;
       speed = snapshot.speed;
-      target.tunnel.update(snapshot.distance, snapshot.gates + 1);
-      target.entityField.sync(snapshot.entities, snapshot.distance);
+      if (worldChanged) {
+        target.tunnel.update(snapshot.distance, snapshot.gates + 1);
+        target.entityField.sync(snapshot.entities, snapshot.distance);
+      }
       target.ship.setLaneX(LANE_X[snapshot.lane], deltaSeconds, snapLane || reducedMotion);
       target.ship.update(visualElapsedSeconds, snapshot.speed, reducedMotion);
     } else {
-      target.tunnel.update(0, 1);
-      target.entityField.sync([], 0);
+      if (worldChanged) {
+        target.tunnel.update(0, 1);
+        target.entityField.sync([], 0);
+      }
       target.ship.setLaneX(0, deltaSeconds, reducedMotion);
       target.ship.update(visualElapsedSeconds, 26, reducedMotion);
     }
+    lastWorldSnapshot = snapshot;
     target.feedback.update(deltaSeconds, reducedMotion);
     target.ship.setFeedbackPulse(target.feedback.getShipPulse());
     target.atmosphere.update(distance, visualElapsedSeconds, speed, reducedMotion);
@@ -333,6 +340,7 @@ export function createRunnerView(container: HTMLElement, options: RunnerViewOpti
   function replaceGraph(quality: 'desktop' | 'mobile', width: number, height: number): void {
     const replacement = createSceneGraph(quality, width, height);
     applyCameraLayout(replacement, width, height);
+    lastWorldSnapshot = undefined;
     reconcile(replacement, 0, true);
     replacement.postFx.setSize(width, height);
     const previous = graph;

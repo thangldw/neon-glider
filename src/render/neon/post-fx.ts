@@ -65,40 +65,55 @@ const RECONSTRUCTION_VERTEX_SHADER = /* glsl */`
 
 const RECONSTRUCTION_FRAGMENT_SHADER = /* glsl */`
   uniform sampler2D inputTexture;
+  uniform sampler2D bloomTexture;
   uniform vec2 inputTexel;
   varying vec2 vUv;
 
-  float neonLuma(vec3 color) {
-    return dot(color, vec3(0.2126, 0.7152, 0.0722));
-  }
-
   void main() {
-    vec3 center = texture2D(inputTexture, vUv).rgb;
-    float centerLuma = neonLuma(center);
-    vec2 gradient = vec2(dFdx(centerLuma), dFdy(centerLuma));
-    float edgeStrength = clamp(length(gradient) * 4.0, 0.0, 1.0);
-    vec2 edgeDirection = length(gradient) > 0.0001
-      ? normalize(vec2(-gradient.y, gradient.x))
-      : vec2(1.0, 0.0);
-    vec2 edgeOffset = edgeDirection * inputTexel * 0.82;
-    vec3 edgeA = texture2D(inputTexture, vUv + edgeOffset).rgb;
-    vec3 edgeB = texture2D(inputTexture, vUv - edgeOffset).rgb;
-    vec3 reconstructed = mix(center, (edgeA + edgeB) * 0.5, edgeStrength * 0.34);
-
-    vec3 neighborhoodMin = min(center, min(edgeA, edgeB));
-    vec3 neighborhoodMax = max(center, max(edgeA, edgeB));
-    gl_FragColor = vec4(clamp(reconstructed, neighborhoodMin, neighborhoodMax), 1.0);
+    gl_FragColor = vec4(texture2D(inputTexture, vUv).rgb, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
+    vec4 bloomOutput = linearToOutputTexel(texture2D(bloomTexture, vUv));
+    gl_FragColor.rgb += bloomOutput.rgb * bloomOutput.a;
   }
 `;
 
 interface DetailMaterialBinding {
   readonly object: THREE.Mesh;
   readonly original: THREE.Material | THREE.Material[];
-  readonly sources: readonly THREE.Material[];
   readonly proxy: THREE.Material | THREE.Material[];
-  readonly proxies: readonly THREE.Material[];
+}
+
+interface DetailMaterialSyncBinding {
+  readonly source: THREE.Material;
+  readonly proxy: THREE.Material;
+  readonly state: DetailMaterialState;
+}
+
+interface DetailMaterialState {
+  colorR: number;
+  colorG: number;
+  colorB: number;
+  emissiveR: number;
+  emissiveG: number;
+  emissiveB: number;
+  emissiveIntensity: number;
+  map: THREE.Texture | null;
+  wireframe: boolean;
+  vertexColors: boolean;
+  transparent: boolean;
+  opacity: number;
+  alphaTest: number;
+  blending: THREE.Blending;
+  side: THREE.Side;
+  depthTest: boolean;
+  depthWrite: boolean;
+  colorWrite: boolean;
+  polygonOffset: boolean;
+  polygonOffsetFactor: number;
+  polygonOffsetUnits: number;
+  premultipliedAlpha: boolean;
+  toneMapped: boolean;
 }
 
 function createDetailMaterialProxy(source: THREE.Material): THREE.Material {
@@ -178,6 +193,80 @@ function syncDetailMaterialProxy(source: THREE.Material, proxy: THREE.Material):
   proxy.toneMapped = source.toneMapped;
 }
 
+function createDetailMaterialState(source: THREE.Material): DetailMaterialState {
+  const state = {} as DetailMaterialState;
+  captureDetailMaterialState(source, state);
+  return state;
+}
+
+function captureDetailMaterialState(source: THREE.Material, state: DetailMaterialState): void {
+  const colored = source as THREE.Material & {
+    color?: THREE.Color;
+    emissive?: THREE.Color;
+    emissiveIntensity?: number;
+    map?: THREE.Texture | null;
+    wireframe?: boolean;
+    vertexColors?: boolean;
+  };
+  state.colorR = colored.color?.r ?? 1;
+  state.colorG = colored.color?.g ?? 1;
+  state.colorB = colored.color?.b ?? 1;
+  state.emissiveR = colored.emissive?.r ?? 0;
+  state.emissiveG = colored.emissive?.g ?? 0;
+  state.emissiveB = colored.emissive?.b ?? 0;
+  state.emissiveIntensity = colored.emissiveIntensity ?? 1;
+  state.map = colored.map ?? null;
+  state.wireframe = colored.wireframe ?? false;
+  state.vertexColors = colored.vertexColors ?? false;
+  state.transparent = source.transparent;
+  state.opacity = source.opacity;
+  state.alphaTest = source.alphaTest;
+  state.blending = source.blending;
+  state.side = source.side;
+  state.depthTest = source.depthTest;
+  state.depthWrite = source.depthWrite;
+  state.colorWrite = source.colorWrite;
+  state.polygonOffset = source.polygonOffset;
+  state.polygonOffsetFactor = source.polygonOffsetFactor;
+  state.polygonOffsetUnits = source.polygonOffsetUnits;
+  state.premultipliedAlpha = source.premultipliedAlpha;
+  state.toneMapped = source.toneMapped;
+}
+
+function detailMaterialStateChanged(source: THREE.Material, state: DetailMaterialState): boolean {
+  const colored = source as THREE.Material & {
+    color?: THREE.Color;
+    emissive?: THREE.Color;
+    emissiveIntensity?: number;
+    map?: THREE.Texture | null;
+    wireframe?: boolean;
+    vertexColors?: boolean;
+  };
+  return state.colorR !== (colored.color?.r ?? 1)
+    || state.colorG !== (colored.color?.g ?? 1)
+    || state.colorB !== (colored.color?.b ?? 1)
+    || state.emissiveR !== (colored.emissive?.r ?? 0)
+    || state.emissiveG !== (colored.emissive?.g ?? 0)
+    || state.emissiveB !== (colored.emissive?.b ?? 0)
+    || state.emissiveIntensity !== (colored.emissiveIntensity ?? 1)
+    || state.map !== (colored.map ?? null)
+    || state.wireframe !== (colored.wireframe ?? false)
+    || state.vertexColors !== (colored.vertexColors ?? false)
+    || state.transparent !== source.transparent
+    || state.opacity !== source.opacity
+    || state.alphaTest !== source.alphaTest
+    || state.blending !== source.blending
+    || state.side !== source.side
+    || state.depthTest !== source.depthTest
+    || state.depthWrite !== source.depthWrite
+    || state.colorWrite !== source.colorWrite
+    || state.polygonOffset !== source.polygonOffset
+    || state.polygonOffsetFactor !== source.polygonOffsetFactor
+    || state.polygonOffsetUnits !== source.polygonOffsetUnits
+    || state.premultipliedAlpha !== source.premultipliedAlpha
+    || state.toneMapped !== source.toneMapped;
+}
+
 function defaultComposer(renderer: RendererLike, renderTarget: THREE.WebGLRenderTarget): ComposerLike {
   return new EffectComposer(renderer as THREE.WebGLRenderer, renderTarget);
 }
@@ -203,6 +292,7 @@ export function createPostFx(
   let hybridFrame = 0;
   const detailMaterialProxies = new Map<THREE.Material, THREE.Material>();
   const detailMaterialBindings: DetailMaterialBinding[] = [];
+  const detailMaterialSyncBindings: DetailMaterialSyncBinding[] = [];
   let disposed = false;
 
   if (renderer.info) renderer.info.autoReset = false;
@@ -233,12 +323,12 @@ export function createPostFx(
     camera.layers.set(options.detailLayer);
     scene.background = null;
     webglRenderer.autoClear = false;
-    for (const binding of detailMaterialBindings) {
-      for (let index = 0; index < binding.sources.length; index += 1) {
-        syncDetailMaterialProxy(binding.sources[index], binding.proxies[index]);
-      }
-      binding.object.material = binding.proxy;
+    for (const binding of detailMaterialSyncBindings) {
+      if (!detailMaterialStateChanged(binding.source, binding.state)) continue;
+      syncDetailMaterialProxy(binding.source, binding.proxy);
+      captureDetailMaterialState(binding.source, binding.state);
     }
+    for (const binding of detailMaterialBindings) binding.object.material = binding.proxy;
     try {
       webglRenderer.setRenderTarget(null);
       directRender();
@@ -272,6 +362,7 @@ export function createPostFx(
     for (const proxy of detailMaterialProxies.values()) proxy.dispose();
     detailMaterialProxies.clear();
     detailMaterialBindings.length = 0;
+    detailMaterialSyncBindings.length = 0;
     hybridComposition = false;
     for (const pass of passes.splice(0)) pass.dispose();
     current.dispose();
@@ -300,15 +391,6 @@ export function createPostFx(
         && typeof (renderer as THREE.WebGLRenderer).setRenderTarget === 'function';
       if (hybridComposition) {
         composer.renderToScreen = false;
-        bloomOverlayMaterial = new THREE.MeshBasicMaterial({
-          map: bloomPass.renderTargetsHorizontal[0].texture,
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthTest: false,
-          depthWrite: false,
-          toneMapped: false,
-        });
-        bloomOverlay = new FullScreenQuad(bloomOverlayMaterial);
         if (options.quality === 'desktop') {
           const [baseWidth, baseHeight] = scaledSize(options.width, options.height, DESKTOP_BASE_RESOLUTION_SCALE);
           baseTarget = new THREE.WebGLRenderTarget(baseWidth, baseHeight, { type: THREE.UnsignedByteType });
@@ -318,6 +400,7 @@ export function createPostFx(
           baseMaterial = new THREE.ShaderMaterial({
             uniforms: {
               inputTexture: { value: baseTarget.texture },
+              bloomTexture: { value: bloomPass.renderTargetsHorizontal[0].texture },
               inputTexel: { value: new THREE.Vector2(1 / baseWidth, 1 / baseHeight) },
             },
             vertexShader: RECONSTRUCTION_VERTEX_SHADER,
@@ -326,6 +409,16 @@ export function createPostFx(
             depthWrite: false,
           });
           baseQuad = new FullScreenQuad(baseMaterial);
+        } else {
+          bloomOverlayMaterial = new THREE.MeshBasicMaterial({
+            map: bloomPass.renderTargetsHorizontal[0].texture,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthTest: false,
+            depthWrite: false,
+            toneMapped: false,
+          });
+          bloomOverlay = new FullScreenQuad(bloomOverlayMaterial);
         }
         if (options.detailLayer !== undefined) {
           scene.traverse((object) => {
@@ -337,15 +430,14 @@ export function createPostFx(
               if (!proxy) {
                 proxy = createDetailMaterialProxy(source);
                 detailMaterialProxies.set(source, proxy);
+                detailMaterialSyncBindings.push({ source, proxy, state: createDetailMaterialState(source) });
               }
               return proxy;
             });
             detailMaterialBindings.push({
               object,
               original,
-              sources: sourceMaterials,
               proxy: Array.isArray(original) ? proxyMaterials : proxyMaterials[0],
-              proxies: proxyMaterials,
             });
           });
         }
@@ -365,7 +457,7 @@ export function createPostFx(
         return;
       }
       try {
-        if (!hybridComposition || options.bloomLayer === undefined || !bloomOverlay) {
+        if (!hybridComposition || options.bloomLayer === undefined || (!baseQuad && !bloomOverlay)) {
           composer.render();
           return;
         }
@@ -390,11 +482,13 @@ export function createPostFx(
           directRender();
         }
         renderDetail(webglRenderer);
-        const originalAutoClear = webglRenderer.autoClear;
-        webglRenderer.autoClear = false;
-        webglRenderer.setRenderTarget(null);
-        bloomOverlay.render(webglRenderer);
-        webglRenderer.autoClear = originalAutoClear;
+        if (bloomOverlay) {
+          const originalAutoClear = webglRenderer.autoClear;
+          webglRenderer.autoClear = false;
+          webglRenderer.setRenderTarget(null);
+          bloomOverlay.render(webglRenderer);
+          webglRenderer.autoClear = originalAutoClear;
+        }
       } catch {
         disposeComposition();
         completeDirectRender();
