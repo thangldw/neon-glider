@@ -72,6 +72,7 @@ export interface GameScreen {
   setModal(active: boolean): void;
   update(run: RunnerState): void;
   announceLane(lane: 0 | 1 | 2): void;
+  playFeedback(kind: 'collect' | 'collision'): void;
 }
 
 export function createGameScreen(onPause: () => void): GameScreen {
@@ -83,6 +84,8 @@ export function createGameScreen(onPause: () => void): GameScreen {
   viewport.dataset.gameViewport = '';
   viewport.tabIndex = 0;
   viewport.setAttribute('aria-label', 'Vuốt, chạm mép hoặc dùng phím mũi tên để đổi làn');
+  const feedback = element('div', 'game-feedback-layer');
+  feedback.dataset.gameFeedback = '';
 
   const score = metric('SCORE', 'score');
   score.value.classList.add('hud-number');
@@ -129,7 +132,14 @@ export function createGameScreen(onPause: () => void): GameScreen {
   laneStatus.dataset.laneStatus = '';
   laneStatus.setAttribute('aria-live', 'polite');
   const overlay = element('div', 'overlay-slot');
+  viewport.append(feedback);
   screen.append(viewport, leftHud, rightHud, energyHud, pause, laneStatus, overlay);
+
+  const restartClass = (node: HTMLElement, className: string) => {
+    node.classList.remove(className);
+    void node.offsetWidth;
+    node.classList.add(className);
+  };
 
   return {
     element: screen,
@@ -155,6 +165,10 @@ export function createGameScreen(onPause: () => void): GameScreen {
     },
     announceLane(lane) {
       laneStatus.textContent = `Đã chuyển sang làn ${['trái', 'giữa', 'phải'][lane]}`;
+    },
+    playFeedback(kind) {
+      if (kind === 'collect') restartClass(energyBar, 'is-energy-pulse');
+      else restartClass(feedback, 'is-collision-flash');
     },
   };
 }

@@ -34,6 +34,19 @@ it('separates numeric HUD values from their units without changing update hooks'
   expect(screen.element.querySelector('[data-energy-bar]')?.classList).toContain('energy-track');
 });
 
+it('reuses one feedback layer and restarts energy and collision classes', () => {
+  const screen = createGameScreen(vi.fn());
+  document.body.append(screen.element);
+  const feedback = screen.element.querySelector('[data-game-feedback]');
+
+  expect(feedback).toBeTruthy();
+  screen.playFeedback('collect');
+  expect(screen.element.querySelector('[data-energy-bar]')?.classList).toContain('is-energy-pulse');
+  screen.playFeedback('collision');
+  expect(feedback?.classList).toContain('is-collision-flash');
+  expect(screen.element.querySelectorAll('[data-game-feedback]')).toHaveLength(1);
+});
+
 it('keeps the menu concise and exposes one primary action', () => {
   const menu = createMenuScreen({
     profile: { schemaVersion: 1, highScore: 0, longestDistance: 0, runCount: 0, reducedMotion: false },
