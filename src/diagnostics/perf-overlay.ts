@@ -57,7 +57,7 @@ export function createPerfMonitor(options: { visible: boolean; host?: HTMLElemen
   if (overlay) {
     overlay.className = 'perf-overlay';
     overlay.dataset.perfOverlay = '';
-    overlay.setAttribute('aria-label', 'Chẩn đoán hiệu năng');
+    overlay.setAttribute('aria-label', 'Performance diagnostics');
     (options.host ?? document.body).append(overlay);
   }
 

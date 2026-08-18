@@ -534,7 +534,7 @@ describe('gameplay feedback sequencing', () => {
     expect(app.getState().screen).toBe('playing');
     vi.advanceTimersByTime(1);
     expect(app.getState()).toMatchObject({ screen: 'result', run: { endReason: 'collision' } });
-    expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    expect(root.querySelector('#result-title')?.textContent).toBe('COLLISION');
     app.destroy();
   });
 
@@ -588,7 +588,7 @@ describe('gameplay feedback sequencing', () => {
 
     expect(app.getState()).toMatchObject({ screen: 'result', run: { status: 'complete', endReason: 'depleted' } });
     expect(view.playFeedback).not.toHaveBeenCalled();
-    expect(root.querySelector('#result-title')?.textContent).toBe('CẠN NĂNG LƯỢNG');
+    expect(root.querySelector('#result-title')?.textContent).toBe('OUT OF ENERGY');
     app.destroy();
   });
 
@@ -655,7 +655,7 @@ describe('gameplay feedback sequencing', () => {
       run: { status: 'complete', endReason: 'collision' },
       profile: { runCount: 1 },
     });
-    expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    expect(root.querySelector('#result-title')?.textContent).toBe('COLLISION');
     vi.advanceTimersByTime(1_000);
     expect(saveProfile).toHaveBeenCalledOnce();
     app.destroy();
@@ -683,7 +683,7 @@ describe('gameplay feedback sequencing', () => {
       run: { status: 'complete', endReason: 'collision' },
       profile: { runCount: 1 },
     });
-    expect(root.querySelector('#result-title')?.textContent).toBe('VA CHẠM');
+    expect(root.querySelector('#result-title')?.textContent).toBe('COLLISION');
     vi.advanceTimersByTime(1_000);
     expect(saveProfile).toHaveBeenCalledOnce();
     app.destroy();

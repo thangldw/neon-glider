@@ -362,7 +362,7 @@ export function createAppController(
     renderMenu();
   };
 
-  const pauseRun = (message = 'Lượt chơi đang tạm dừng.', wantsResume = false) => {
+  const pauseRun = (message = 'Run paused.', wantsResume = false) => {
     if (!run || run.status === 'complete' || !gameScreen || (screen !== 'playing' && screen !== 'countdown' && screen !== 'paused')) return;
     clearCountdown();
     resumeRequested = wantsResume;
@@ -447,7 +447,7 @@ export function createAppController(
             return;
           }
           contextSuspended = true;
-          pauseRun('Kết nối đồ họa bị gián đoạn.', screen === 'playing' || screen === 'countdown' || resumeRequested);
+          pauseRun('Graphics connection interrupted.', screen === 'playing' || screen === 'countdown' || resumeRequested);
         },
         onContextRestored: () => {
           if (!contextSuspended || !run || !gameScreen || !view) return;
@@ -479,7 +479,7 @@ export function createAppController(
     resumeRequested = true;
     if (document.visibilityState === 'hidden') {
       visibilitySuspended = true;
-      pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
+      pauseRun('Run paused while the page was hidden.', true);
     } else {
       resumeWhenReady();
     }
@@ -493,7 +493,7 @@ export function createAppController(
     resumeRequested = true;
     if (document.visibilityState === 'hidden') {
       visibilitySuspended = true;
-      pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
+      pauseRun('Run paused while the page was hidden.', true);
     } else {
       resumeWhenReady();
     }
@@ -507,7 +507,7 @@ export function createAppController(
       }
       if (run && (screen === 'playing' || screen === 'countdown')) {
         visibilitySuspended = true;
-        pauseRun('Lượt chơi tạm dừng khi trang bị ẩn.', true);
+        pauseRun('Run paused while the page was hidden.', true);
       }
       return;
     }

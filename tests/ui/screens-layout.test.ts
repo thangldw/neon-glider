@@ -105,7 +105,7 @@ it('uses the maintained pause icon inside an accessible playfield-external contr
   const screen = createGameScreen(vi.fn());
   const pause = screen.element.querySelector<HTMLButtonElement>('[data-action="pause"]');
 
-  expect(pause?.getAttribute('aria-label')).toBe('Tạm dừng');
+  expect(pause?.getAttribute('aria-label')).toBe('Pause');
   expect(pause?.querySelector('i.ph.ph-pause')?.getAttribute('aria-hidden')).toBe('true');
   expect(screen.viewport.contains(pause)).toBe(false);
 });
@@ -121,11 +121,11 @@ it('renders collision and depletion results without learning content', () => {
     run: { ...createRunner(2), status: 'complete', endReason: 'depleted' },
   });
 
-  expect(collision.textContent).toContain('VA CHẠM');
-  expect(depletion.textContent).toContain('CẠN NĂNG LƯỢNG');
+  expect(collision.textContent).toContain('COLLISION');
+  expect(depletion.textContent).toContain('OUT OF ENERGY');
   expect(collision.getAttribute('role')).toBe('dialog');
   expect(collision.getAttribute('aria-modal')).toBe('true');
-  expect(`${collision.textContent} ${depletion.textContent}`).not.toContain('20 câu');
+  expect(`${collision.textContent} ${depletion.textContent}`).not.toContain('20 questions');
 });
 
 it('provides semantic menu, countdown, pause, storage, and WebGL failure screens', () => {
@@ -135,16 +135,36 @@ it('provides semantic menu, countdown, pause, storage, and WebGL failure screens
     onReducedMotion: vi.fn(),
   });
   const countdown = createCountdownOverlay(3);
-  const paused = createPauseOverlay('Lượt chơi đang tạm dừng.', vi.fn(), vi.fn());
+  const paused = createPauseOverlay('Run paused.', vi.fn(), vi.fn());
   const warning = createStorageWarning();
   const fatal = createWebGLFatalScreen();
 
   expect(menu.textContent).toContain('NEON GLIDER');
-  expect(menu.textContent).toContain('SỐNG SÓT. NÉ CHƯỚNG NGẠI. GIỮ NĂNG LƯỢNG.');
+  expect(menu.textContent).toContain('SURVIVE. DODGE OBSTACLES. KEEP YOUR ENERGY UP.');
+  expect(menu.textContent).toContain('HIGH SCORE 9,999');
+  expect(menu.querySelector('[data-action="start"]')?.textContent).toBe('Start');
+  expect(menu.querySelector('[data-reduced-motion]')?.parentElement?.textContent).toContain('Reduced motion');
+  expect(paused.textContent).toContain('PAUSED');
+  expect(paused.textContent).toContain('Resume');
+  expect(paused.textContent).toContain('Main menu');
+  expect(countdown.textContent).toContain('Starting in');
+  expect(warning.textContent).toBe('Progress cannot be saved in this browser.');
+  expect(fatal.textContent).toContain('WEBGL COULD NOT START');
   expect(menu.querySelector('[data-action="start"]')).toBeInstanceOf(HTMLButtonElement);
   expect(countdown.dataset.screen).toBe('countdown');
   expect(paused.getAttribute('role')).toBe('dialog');
   expect(warning.getAttribute('role')).toBe('status');
   expect(fatal.getAttribute('role')).toBe('alert');
-  expect(`${menu.textContent} ${fatal.textContent}`).not.toContain('ba cổng chữ');
+  expect(`${menu.textContent} ${fatal.textContent}`).not.toContain('three character gates');
+});
+
+it('uses English accessibility copy for the game HUD', () => {
+  const screen = createGameScreen(vi.fn());
+  screen.announceLane(2);
+
+  expect(screen.element.getAttribute('aria-label')).toBe('Neon Glider flight path');
+  expect(screen.viewport.getAttribute('aria-label')).toBe('Swipe, tap an edge, or use arrow keys to change lanes');
+  expect(screen.element.querySelector('[data-action="pause"]')?.getAttribute('aria-label')).toBe('Pause');
+  expect(screen.element.querySelector('[data-energy-bar]')?.getAttribute('aria-label')).toBe('Energy');
+  expect(screen.element.querySelector('[data-lane-status]')?.textContent).toBe('Moved to the right lane');
 });

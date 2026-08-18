@@ -48,6 +48,7 @@ describe('performance monitor', () => {
     monitor.record(116, { drawCalls: 8, geometries: 4, textures: 3 });
 
     expect(host.querySelector('[data-perf-overlay]')?.textContent).toContain('16.0 ms');
+    expect(host.querySelector('[data-perf-overlay]')?.getAttribute('aria-label')).toBe('Performance diagnostics');
     monitor.dispose();
     expect(host.querySelector('[data-perf-overlay]')).toBeNull();
   });

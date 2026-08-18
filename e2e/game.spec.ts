@@ -64,7 +64,7 @@ async function startRun(page: Page, seed = 7, realTime = false): Promise<void> {
   await seedNextRun(page, seed);
   if (!realTime) await page.clock.install({ time: new Date('2026-08-17T00:00:00Z') });
   await page.goto('?e2e=1');
-  await page.getByRole('button', { name: 'Bắt đầu' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('[data-countdown]')).toHaveText('3');
   if (!realTime) await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
@@ -251,7 +251,7 @@ test('starts, steers, collects, passes a gate and reaches collision result', asy
     (window as typeof window & { __NEON_GLIDER_E2E__?: { forceEnd(reason: 'collision'): void } })
       .__NEON_GLIDER_E2E__?.forceEnd('collision');
   });
-  await expect(page.locator('[data-screen="result"]')).toContainText('VA CHẠM');
+  await expect(page.locator('[data-screen="result"]')).toContainText('COLLISION');
 });
 
 test('restores every serialized run field exactly after reload countdown', async ({ page }) => {
@@ -280,7 +280,7 @@ test('isolates a new browser context while preserving high score in the active p
   await page.reload();
   const persisted = await snapshot(page);
   expect(persisted.profile.highScore).toBeGreaterThanOrEqual(score);
-  await expect(page.locator('[data-screen="menu"]')).toContainText('KỶ LỤC');
+  await expect(page.locator('[data-screen="menu"]')).toContainText('HIGH SCORE');
 
   const isolatedContext = await browser.newContext();
   const isolatedPage = await isolatedContext.newPage();
@@ -312,9 +312,9 @@ test('changes lanes through pointer on desktop and touch on Pixel 7', async ({ p
 
 test('pauses, resumes through countdown, and restores after a context interruption', async ({ page }) => {
   await startRun(page, 19);
-  await page.getByRole('button', { name: 'Tạm dừng' }).click();
+  await page.getByRole('button', { name: 'Pause' }).click();
   await waitForScreen(page, 'paused');
-  await page.getByRole('button', { name: 'Tiếp tục' }).click();
+  await page.getByRole('button', { name: 'Resume' }).click();
   await expect(page.locator('[data-countdown]')).toHaveText('3');
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
@@ -341,7 +341,7 @@ test('holds an initially hidden run until visibility resumes', async ({ page }) 
     };
   });
   await page.goto('?e2e=1');
-  await page.getByRole('button', { name: 'Bắt đầu' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
   await waitForScreen(page, 'paused');
   await page.waitForTimeout(3_200);
   await waitForScreen(page, 'paused');
@@ -370,7 +370,7 @@ test('ends from real energy depletion', async ({ page }) => {
     (window as typeof window & { __NEON_GLIDER_E2E__?: { advance(seconds: number): void } })
       .__NEON_GLIDER_E2E__?.advance(0.25);
   });
-  await expect(page.locator('[data-screen="result"]')).toContainText('CẠN NĂNG LƯỢNG');
+  await expect(page.locator('[data-screen="result"]')).toContainText('OUT OF ENERGY');
 });
 
 test('reaches deterministic speed and multiplier caps without collisions', async ({ page }) => {
@@ -481,7 +481,7 @@ test('honors reduced motion in controller, DOM, and CSS', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('?e2e=1');
   await expect(page.locator('#app')).toHaveAttribute('data-reduced-motion', 'true');
-  await page.getByRole('button', { name: 'Bắt đầu' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
   await waitForScreen(page, 'playing', 10_000);
   expect((await snapshot(page)).run?.reducedMotion).toBe(true);
   expect(await page.locator('.energy-fill').evaluate((node) => getComputedStyle(node).transitionDuration)).toBe('0s');
@@ -596,7 +596,7 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   await page.goto('?e2e=1');
   await expect(page.locator('.menu-kicker')).toHaveText('ENDLESS NEON RUNNER');
   await screenshot(page, directory, 'menu.png');
-  await page.getByRole('button', { name: 'Bắt đầu' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   await setSimulationFrozen(page, true);
@@ -617,7 +617,7 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   await setLane(page, 1);
   await expect.poll(async () => (await snapshot(page)).run).toMatchObject({ lane: 1, distance: 247 });
   await screenshot(page, directory, 'gate.png');
-  await page.getByRole('button', { name: 'Tạm dừng' }).click();
+  await page.getByRole('button', { name: 'Pause' }).click();
   await screenshot(page, directory, 'paused.png');
   await page.evaluate(() => (
     window as typeof window & { __NEON_GLIDER_E2E__?: { forceEnd(reason: 'collision'): void } }
@@ -625,7 +625,7 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   await screenshot(page, directory, 'collision-result.png');
 
   await page.goto('?e2e=1');
-  await page.getByRole('button', { name: 'Bắt đầu' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   await setSimulationFrozen(page, true);
@@ -635,8 +635,8 @@ test('captures the required player-visible states', async ({ page }, testInfo) =
   await screenshot(page, directory, 'depleted-result.png');
 
   await page.goto('?e2e=1');
-  await page.getByRole('checkbox', { name: 'Giảm chuyển động' }).check();
-  await page.getByRole('button', { name: 'Bắt đầu' }).click();
+  await page.getByRole('checkbox', { name: 'Reduced motion' }).check();
+  await page.getByRole('button', { name: 'Start' }).click();
   await page.clock.fastForward(3_000);
   await waitForScreen(page, 'playing', 10_000);
   await setSimulationFrozen(page, true);
