@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNeonGame } from "./game/useNeonGame.js";
+import { SupportWork } from "./ui/SupportWork.jsx";
 import { GameHud } from "./ui/GameHud.jsx";
 import { GameOverlays } from "./ui/GameOverlays.jsx";
 
@@ -28,6 +29,7 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
+      if (document.querySelector("dialog[open]") || event.target.closest?.("button, input, a, select, textarea")) return;
       if (["ArrowLeft", "ArrowRight", " "].includes(event.key)) event.preventDefault();
       if (event.code === "Space" && !event.repeat) boost(true);
       if (["ArrowLeft", "a", "A"].includes(event.key)) move(-1);
@@ -81,6 +83,7 @@ export function App() {
           <button aria-label="Move right" onClick={() => move(1)}>→</button>
         </div>
       </>}
+      {["start", "paused", "gameover"].includes(state.phase) && <SupportWork />}
       <GameHud state={state} onPause={pause} />
       <GameOverlays
         state={state}
