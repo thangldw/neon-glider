@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createGameState, moveLane, startRun, stepGame, togglePause } from "./model.js";
+import { createGameState, moveLane, startRun, stepGame, togglePause, setBoost } from "./model.js";
+import { createFlightAudio } from "./audio.js";
 import { createNeonWorld } from "./neonWorld.js";
 
-export function useNeonGame({ canvasRef, reducedMotion }) {
+export function useNeonGame({ canvasRef, reducedMotion, soundEnabled }) {
   const [state, setState] = useState(() => createGameState(Date.now() & 0xffff));
-  const [effects, setEffects] = useState({ collect: 0, hit: 0 });
+  const [effects, setEffects] = useState({ collect: 0, hit: 0, message: "", messageAt: 0 });
   const stateRef = useRef(state);
   const worldRef = useRef(null);
+  const audioRef = useRef(null);
+  const soundRef = useRef(soundEnabled);
+  useEffect(() => { soundRef.current = soundEnabled; }, [soundEnabled]);
   const countdownStartRef = useRef(0);
 
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -16,6 +20,7 @@ export function useNeonGame({ canvasRef, reducedMotion }) {
     if (!canvas) return undefined;
 
     const world = createNeonWorld(canvas);
+    audioRef.current = createFlightAudio();
     worldRef.current = world;
     const resize = () => {
       const bounds = canvas.getBoundingClientRect();
@@ -41,6 +46,11 @@ export function useNeonGame({ canvasRef, reducedMotion }) {
         const result = stepGame(next, dt);
         next = result.state;
         if (result.events.includes("collect")) setEffects((value) => ({ ...value, collect: now }));
+        if (result.events.length) {
+          if (soundRef.current) audioRef.current?.play(result.events.includes("hit") ? "hit" : result.events[0]);
+          const message = result.events.includes("hit") ? "HULL HIT −26" : result.events.includes("gate") ? `SECTOR ${next.gate}` : result.events.includes("collect") ? "ENERGY +14" : result.events.includes("near-miss") ? "CLOSE CALL" : "";
+          if (message) setEffects((value) => ({ ...value, message, messageAt: now }));
+        }
         if (result.events.includes("hit")) setEffects((value) => ({ ...value, hit: now }));
       }
 
@@ -57,6 +67,7 @@ export function useNeonGame({ canvasRef, reducedMotion }) {
       cancelAnimationFrame(frame);
       observer.disconnect();
       world.dispose();
+      audioRef.current?.dispose();
       worldRef.current = null;
     };
   }, [canvasRef]);
@@ -66,10 +77,11 @@ export function useNeonGame({ canvasRef, reducedMotion }) {
   useEffect(() => { worldRef.current?.setReducedMotion(reducedMotion); }, [reducedMotion]);
 
   const start = useCallback(() => {
+    if (soundRef.current) audioRef.current?.unlock();
     countdownStartRef.current = performance.now();
     const next = { ...startRun(stateRef.current), phase: "countdown", countdown: 3 };
     stateRef.current = next;
-    setEffects({ collect: 0, hit: 0 });
+    setEffects({ collect: 0, hit: 0, message: "", messageAt: 0 });
     setState(next);
   }, []);
 
@@ -85,6 +97,24 @@ export function useNeonGame({ canvasRef, reducedMotion }) {
     setState(next);
   }, []);
 
+  useEffect(() => {
+    const suspend = () => {
+      if (document.hidden && stateRef.current.phase === "playing") {
+        const next = { ...stateRef.current, phase: "paused", boosting: false };
+        stateRef.current = next;
+        setState(next);
+      }
+    };
+    document.addEventListener("visibilitychange", suspend);
+    return () => document.removeEventListener("visibilitychange", suspend);
+  }, []);
+
+  const boost = useCallback((active) => {
+    const next = setBoost(stateRef.current, active);
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
   const restart = start;
-  return { state, effects, start, move, pause, restart };
+  return { state, effects, start, move, pause, restart, boost };
 }

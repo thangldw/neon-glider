@@ -65,6 +65,34 @@ test("pickup rewards energy and multiplier while blocker hits reset multiplier",
 test("speed increases with distance but never exceeds the cap", () => {
   let state = startRun(createGameState(29));
   for (let i = 0; i < 600; i += 1) state = stepGame(state, 100).state;
-  assert.ok(state.speed > 28);
+  assert.ok(state.speed > 30);
   assert.ok(state.speed <= 54);
+});
+
+test("boost consumes charge, increases speed, and regenerates after release", () => {
+  let state = { ...startRun(createGameState(1)), boosting: true };
+  state = stepGame(state, 50).state;
+  assert.ok(state.speed > 40);
+  assert.ok(state.boost < 100);
+  const charge = state.boost;
+  state = stepGame({ ...state, boosting: false }, 50).state;
+  assert.ok(state.boost > charge);
+  const exhausted = stepGame({ ...state, boosting: true, boost: 0.1 }, 50).state;
+  assert.equal(exhausted.boost, 0);
+  assert.equal(exhausted.boosting, false);
+});
+
+test("close-call reward requires a recent lane change and resolves once", () => {
+  const base = { ...startRun(createGameState(1)), objects: [{ id: 1, kind: "blocker", lane: 0, z: 1, resolved: false }] };
+  assert.equal(stepGame({ ...base, lane: 1 }, 16).state.nearMisses, 0);
+  const result = stepGame(moveLane(base, 1), 16);
+  assert.equal(result.state.nearMisses, 1);
+  assert.equal(result.state.combo, 1);
+  assert.equal(stepGame(result.state, 16).state.nearMisses, 1);
+});
+
+test("paused boost does not consume charge and restart clears run statistics", () => {
+  const state = { ...startRun(createGameState(2)), boosting: true, combo: 7, bestCombo: 9 };
+  assert.equal(stepGame(togglePause(state), 50).state.boost, 100);
+  assert.equal(startRun(state).bestCombo, 0);
 });

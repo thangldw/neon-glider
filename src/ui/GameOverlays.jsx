@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 export function GameOverlays({
   state,
   highScore,
+  soundEnabled,
+  onSoundChange,
   reducedMotion,
   onReducedMotionChange,
   onStart,
@@ -21,12 +23,15 @@ export function GameOverlays({
     return (
       <section className="game-overlay start-overlay" aria-label="NEON GLIDER">
         <div className="overlay-copy">
-          <p className="eyebrow">ENDLESS NEON RUNNER</p>
-          <h1>NEON GLIDER</h1>
+          <p className="eyebrow">FLIGHT SYSTEM / 02</p>
+          <h1>NEON<br /><em>GLIDER</em></h1>
           <p className="mission">SURVIVE. DODGE OBSTACLES. KEEP YOUR ENERGY UP.</p>
           <p className="high-score">HIGH SCORE {highScore.toLocaleString()}</p>
-          <p className="controls-copy">A / D — CHANGE LANE&nbsp;&nbsp;&nbsp; ESC / P — PAUSE</p>
+          <div className="flight-brief"><span><b>01</b> DODGE THE BLOCKERS</span><span><b>02</b> COLLECT ENERGY</span><span><b>03</b> BOOST. CHASE YOUR BEST.</span></div>
+          <p className="controls-copy">A / D — CHANGE LANE&nbsp;&nbsp;&nbsp; ESC / P — PAUSE · SPACE — BOOST</p>
           <button ref={primaryRef} className="primary-button" onClick={onStart}>Start</button>
+          <p className="launch-note">THREE LANES. ONE WAY FORWARD.</p>
+          <label className="motion-toggle"><input type="checkbox" checked={soundEnabled} onChange={(e) => onSoundChange(e.target.checked)} /><span>Sound effects</span></label>
           <label className="motion-toggle">
             <input
               type="checkbox"
@@ -71,6 +76,7 @@ export function GameOverlays({
         <span>DISTANCE <strong>{Math.round(state.distance)}m</strong></span>
         <span>BEST <strong>{Math.max(highScore, Math.round(state.score)).toLocaleString()}</strong></span>
       </div>
+      <p className="run-detail">{state.pickups} ENERGY CELLS · {state.nearMisses} CLOSE CALLS · BEST COMBO {state.bestCombo}</p>
       <button ref={primaryRef} className="primary-button" onClick={onRestart}>Run again</button>
     </section>
   );

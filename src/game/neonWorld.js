@@ -181,6 +181,11 @@ function makeGlider() {
   canopy.scale.set(0.72, 0.9, 1.25);
   canopy.position.set(0, 0.35, -0.12);
   group.add(canopy);
+  group.traverse((child) => {
+    if (!child.isMesh || child.material !== hullMaterial) return;
+    const outline = new THREE.LineSegments(new THREE.EdgesGeometry(child.geometry), lineMaterial(palette.cyan, 0.65));
+    child.add(outline);
+  });
   group.scale.setScalar(0.7);
   group.position.set(0, 0.45, 2);
   return group;
@@ -276,12 +281,24 @@ export function buildNeonScene() {
     flow.add(chevron);
   }
 
+  const stars = new THREE.Group();
+  stars.name = "starfield";
+  const starPositions = [];
+  for (let i = 0; i < 420; i++) {
+    const angle = i * 2.399963;
+    const radius = 8 + (i % 17) * 0.8;
+    starPositions.push(Math.cos(angle) * radius, Math.sin(angle) * radius, -(i % 160));
+  }
+  const starGeometry = new THREE.BufferGeometry();
+  starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
+  stars.add(new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: palette.cyan, size: 0.055, transparent: true, opacity: 0.65 })));
+
   const objects = new THREE.Group();
   objects.name = "objects";
   const effects = new THREE.Group();
   effects.name = "effects";
   const glider = makeGlider();
-  scene.add(speedLines, tunnel, lanes, flow, glider, objects, effects);
+  scene.add(stars, speedLines, tunnel, lanes, flow, glider, objects, effects);
 
   return { scene, camera, groups: { speedLines, tunnel, lanes, flow, glider, objects, effects } };
 }
@@ -389,7 +406,15 @@ export function createNeonWorld(canvas) {
   function render(state, effects = { collect: 0, hit: 0 }) {
     if (contextLost) return;
     const now = performance.now();
-    const tunnelOffset = state.distance % TUNNEL_SPACING;
+    const tunnelOffset = (state.distance * 3.125) % TUNNEL_SPACING;
+    const sectorColors = [palette.cyan, 0x9c87ff, 0xffba69, 0x62ffd1];
+    const sectorColor = sectorColors[(state.gate - 1) % sectorColors.length];
+    groups.tunnel.children.forEach((rib, index) => {
+      if (index % 3 !== 0) rib.children.forEach((layer) => layer.material.color.setHex(sectorColor));
+    });
+    const targetFov = state.boosting && !reducedMotion ? 74 : 64;
+    camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 0.07);
+    camera.updateProjectionMatrix();
     groups.tunnel.children.forEach((rib, index) => {
       rib.position.z = TUNNEL_START_Z - index * TUNNEL_SPACING + tunnelOffset;
       const near = Math.max(0, Math.min(1, (rib.position.z + 40) / 40));
@@ -397,7 +422,7 @@ export function createNeonWorld(canvas) {
         layer.material.opacity = layer.userData.layer === "glow" ? 0.12 + near * 0.3 : 0.68 + near * 0.32;
       });
     });
-    const flowOffset = state.distance % 7;
+    const flowOffset = (state.distance * 3.125) % 7;
     groups.flow.children.forEach((chevron, index) => {
       chevron.position.z = 2 - index * 7 + flowOffset;
       const depth = Math.max(0, Math.min(1, (chevron.position.z + 70) / 70));

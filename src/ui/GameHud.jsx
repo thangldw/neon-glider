@@ -7,7 +7,7 @@ export function GameHud({ state, onPause }) {
       <section className="hud-score" aria-label="Score">
         <span>SCORE</span>
         <strong>{Math.round(state.score).toLocaleString()}</strong>
-        <span>MULTIPLIER</span>
+        <span>MULTIPLIER · {state.combo} COMBO</span>
         <b>×{state.multiplier.toFixed(1)}</b>
       </section>
 
@@ -15,6 +15,7 @@ export function GameHud({ state, onPause }) {
         <span>DISTANCE</span>
         <strong>{Math.round(state.distance)}<small>m</small></strong>
         <b>GATE {state.gate}</b>
+        <small className="speed-readout">SPEED {Math.round(state.speed)}</small>
       </section>
 
       <section className="hud-energy" aria-label="Energy">
