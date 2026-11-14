@@ -26,3 +26,7 @@ npm run deploy
 `npm run deploy` runs the `predeploy` test/build gate and publishes `dist/client` to the `gh-pages` branch. Keep this deployment branch; it is not a stale feature branch. Verify the Pages build and the live game after publication. A dependency-only change can produce an identical artifact and therefore no new gh-pages commit.
 
 Live: <https://thangldw.github.io/neon-glider/>
+
+## License
+
+Released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for scope.
