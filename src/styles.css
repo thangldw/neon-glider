@@ -440,3 +440,13 @@ input:focus-visible {
 
 
 .new-best { margin: 0 0 8px; color: var(--magenta); font: 700 22px "Barlow Condensed", sans-serif; letter-spacing: 0.24em; }
+
+/* Pause sits bottom-center; the energy bar and flight controls stack above it. */
+.pause-button { left: 50%; right: auto; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: 48px; }
+.hud-energy { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 48px + 8px); }
+.flight-controls { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 48px + 8px + 16px + 8px); }
+@media (max-width: 600px) {
+  .pause-button { width: 44px; }
+  .hud-energy { width: calc(100vw - 56px); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 44px + 8px); }
+  .flight-controls { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 44px + 8px + 14px + 8px); }
+}
