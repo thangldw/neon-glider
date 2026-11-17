@@ -94,14 +94,13 @@ export function stepGame(state, dtMs) {
   const distance = state.distance + speed * dtSeconds * 0.32;
   const gate = Math.floor(distance / 250) + 1;
   const events = gate > state.gate ? ["gate"] : [];
-  let energy = Math.max(0, state.energy - dtSeconds * (1.7 + speed * 0.018));
-  let multiplier = state.multiplier;
+  let energy = Math.max(0, state.energy - dtSeconds * (1.7 + speed * 0.018) * (boosting ? 1.5 : 1));
+  let multiplier = Math.max(1, Number((state.multiplier - dtSeconds * 0.06).toFixed(3)));
   let { combo, bestCombo, pickups, nearMisses, hits } = state;
   let objects = state.objects.map((object) => ({ ...object, z: object.z - speed * dtSeconds }));
 
   objects = objects.map((object) => {
     if (object.resolved || object.kind === "warning" || object.z > HIT_Z) return object;
-    if (object.z < -8) return { ...object, resolved: true };
     if (object.lane !== state.lane) {
       if (object.kind === "blocker" && Math.abs(object.lane - state.lane) === 1 && state.distance - state.lastLaneChange < 3) {
         nearMisses += 1;
@@ -129,7 +128,8 @@ export function stepGame(state, dtMs) {
   });
 
   objects = objects.filter((object) => object.z >= -8);
-  const spawnInterval = Math.max(0.72, 1.25 - speed * 0.009);
+  const cruiseSpeed = boosting ? speed / 1.45 : speed;
+  const spawnInterval = Math.max(0.72, 1.25 - cruiseSpeed * 0.009) / (boosting ? 1.2 : 1);
   let spawnClock = state.spawnClock + dtSeconds;
   let nextId = state.nextId;
   if (spawnClock >= spawnInterval) {

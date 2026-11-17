@@ -2,33 +2,35 @@ import { useEffect, useRef, useState } from "react";
 import { useNeonGame } from "./game/useNeonGame.js";
 import { GameHud } from "./ui/GameHud.jsx";
 import { GameOverlays } from "./ui/GameOverlays.jsx";
+import { readStore, writeStore } from "./storage.js";
+import { shouldIgnoreKey } from "./input.js";
 
 export function App() {
   const canvasRef = useRef(null);
   const pointerStartRef = useRef(null);
-  const [reducedMotion, setReducedMotion] = useState(() => localStorage.getItem("neon-reduced-motion") === "true");
-  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("neon-sound") !== "false");
-  const [highScore, setHighScore] = useState(() => Number(localStorage.getItem("neon-high-score-v2") || 0));
+  const [reducedMotion, setReducedMotion] = useState(() => readStore("neon-reduced-motion", "false") === "true");
+  const [soundEnabled, setSoundEnabled] = useState(() => readStore("neon-sound", "true") !== "false");
+  const [highScore, setHighScore] = useState(() => Number(readStore("neon-high-score-v2", 0)) || 0);
   const { state, effects, start, move, pause, restart, boost } = useNeonGame({ canvasRef, reducedMotion, soundEnabled });
 
-  useEffect(() => { localStorage.setItem("neon-sound", String(soundEnabled)); }, [soundEnabled]);
+  useEffect(() => { writeStore("neon-sound", soundEnabled); }, [soundEnabled]);
 
   useEffect(() => {
-    localStorage.setItem("neon-reduced-motion", String(reducedMotion));
+    writeStore("neon-reduced-motion", reducedMotion);
   }, [reducedMotion]);
 
   useEffect(() => {
     if (state.phase !== "gameover") return;
     setHighScore((current) => {
       const next = Math.max(current, Math.round(state.score));
-      localStorage.setItem("neon-high-score-v2", String(next));
+      writeStore("neon-high-score-v2", next);
       return next;
     });
   }, [state.phase, state.score]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (document.querySelector("dialog[open]") || event.target.closest?.("button, input, a, select, textarea")) return;
+      if (document.querySelector("dialog[open]") || shouldIgnoreKey(event)) return;
       if (["ArrowLeft", "ArrowRight", " "].includes(event.key)) event.preventDefault();
       if (event.code === "Space" && !event.repeat) boost(true);
       if (["ArrowLeft", "a", "A"].includes(event.key)) move(-1);
