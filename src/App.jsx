@@ -13,6 +13,9 @@ export function App() {
   const [highScore, setHighScore] = useState(() => Number(readStore("neon-high-score-v2", 0)) || 0);
   const { state, effects, start, move, pause, restart, boost } = useNeonGame({ canvasRef, reducedMotion, soundEnabled });
 
+  const runStartHighRef = useRef(highScore);
+  useEffect(() => { if (state.phase === "countdown") runStartHighRef.current = highScore; }, [state.phase, highScore]);
+
   useEffect(() => { writeStore("neon-sound", soundEnabled); }, [soundEnabled]);
 
   useEffect(() => {
@@ -88,6 +91,7 @@ export function App() {
       <GameOverlays
         state={state}
         highScore={highScore}
+        newBest={state.phase === "gameover" && Math.round(state.score) > runStartHighRef.current}
         soundEnabled={soundEnabled}
         onSoundChange={setSoundEnabled}
         reducedMotion={reducedMotion}

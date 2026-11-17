@@ -54,7 +54,7 @@ export function useNeonGame({ canvasRef, reducedMotion, soundEnabled }) {
         if (result.events.includes("collect")) setEffects((value) => ({ ...value, collect: now }));
         if (result.events.length) {
           if (soundRef.current) audioRef.current?.play(result.events.includes("hit") ? "hit" : result.events[0]);
-          const message = result.events.includes("hit") ? "HULL HIT −26" : result.events.includes("gate") ? `SECTOR ${next.gate}` : result.events.includes("collect") ? "ENERGY +14" : result.events.includes("near-miss") ? "CLOSE CALL" : "";
+          const message = result.events.includes("hit") ? "HULL HIT −26" : result.events.includes("gate") ? `SECTOR ${next.gate}` : result.events.includes("collect") ? "ENERGY +10" : result.events.includes("near-miss") ? "CLOSE CALL" : "";
           if (message) setEffects((value) => ({ ...value, message, messageAt: now }));
         }
         if (result.events.includes("hit")) setEffects((value) => ({ ...value, hit: now }));

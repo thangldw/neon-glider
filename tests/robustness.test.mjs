@@ -75,3 +75,11 @@ test("HUD publishing is throttled but structural changes publish at once", () =>
   assert.equal(shouldPublish(base, { ...base, phase: "gameover" }, [], 10, 0), true);
   assert.equal(shouldPublish(base, base, ["collect"], 10, 0), true);
 });
+
+test("energy drain grows with gate so a clean run cannot last forever", () => {
+  const drain = (gate) => {
+    const base = { ...startRun(createGameState(2)), gate, distance: (gate - 1) * 250, objects: [] };
+    return base.energy - stepGame(base, 50).state.energy;
+  };
+  assert.ok(drain(12) > drain(1) * 2);
+});

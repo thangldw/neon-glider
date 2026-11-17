@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 export function GameOverlays({
   state,
   highScore,
+  newBest,
   soundEnabled,
   onSoundChange,
   reducedMotion,
@@ -71,6 +72,7 @@ export function GameOverlays({
     <section className="game-overlay compact-overlay">
       <p className="eyebrow">ENERGY DEPLETED</p>
       <h2>RUN OVER</h2>
+      {newBest && <p className="new-best" role="status">NEW BEST</p>}
       <div className="run-summary">
         <span>SCORE <strong>{Math.round(state.score).toLocaleString()}</strong></span>
         <span>DISTANCE <strong>{Math.round(state.distance)}m</strong></span>

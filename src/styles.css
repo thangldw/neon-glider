@@ -438,3 +438,5 @@ input:focus-visible {
 }
 .reduced-motion .event-toast { animation: toast-fade 1.3s both; }
 
+
+.new-best { margin: 0 0 8px; color: var(--magenta); font: 700 22px "Barlow Condensed", sans-serif; letter-spacing: 0.24em; }

@@ -2,6 +2,8 @@ export const LANES = [-1, 0, 1];
 export const PHASES = ["start", "countdown", "playing", "paused", "gameover"];
 export const INITIAL_ENERGY = 100;
 
+const PICKUP_ENERGY = 10;
+const PICKUP_CHANCE = 0.55;
 const BASE_SPEED = 30;
 const MAX_SPEED = 54;
 const HIT_Z = 2.4;
@@ -34,7 +36,9 @@ function nextPattern(state) {
     objects.push({ id: blockerId, kind: "blocker", lane, z: SPAWN_Z, resolved: false });
     objects.push({ id: nextId++, kind: "warning", lane, z: SPAWN_Z - 12, resolved: false });
   }
-  objects.push({ id: nextId++, kind: "pickup", lane: pickupLane, z: SPAWN_Z - 5, resolved: false });
+  if (random() < PICKUP_CHANCE) {
+    objects.push({ id: nextId++, kind: "pickup", lane: pickupLane, z: SPAWN_Z - 5, resolved: false });
+  }
 
   return { objects, nextId };
 }
@@ -94,8 +98,8 @@ export function stepGame(state, dtMs) {
   const distance = state.distance + speed * dtSeconds * 0.32;
   const gate = Math.floor(distance / 250) + 1;
   const events = gate > state.gate ? ["gate"] : [];
-  let energy = Math.max(0, state.energy - dtSeconds * (1.7 + speed * 0.018) * (boosting ? 1.5 : 1));
-  let multiplier = Math.max(1, Number((state.multiplier - dtSeconds * 0.06).toFixed(3)));
+  let energy = Math.max(0, state.energy - dtSeconds * (2 + (state.gate - 1) * 0.35) * (boosting ? 1.5 : 1));
+  let multiplier = Math.max(1, Number((state.multiplier - dtSeconds * 0.1).toFixed(3)));
   let { combo, bestCombo, pickups, nearMisses, hits } = state;
   let objects = state.objects.map((object) => ({ ...object, z: object.z - speed * dtSeconds }));
 
@@ -112,8 +116,8 @@ export function stepGame(state, dtMs) {
     }
 
     if (object.kind === "pickup") {
-      energy = Math.min(INITIAL_ENERGY, energy + 14);
-      multiplier = Math.min(4, Number((multiplier + 0.2).toFixed(1)));
+      energy = Math.min(INITIAL_ENERGY, energy + PICKUP_ENERGY);
+      multiplier = Math.min(4, Number((multiplier + 0.3).toFixed(1)));
       pickups += 1;
       combo += 1;
       events.push("collect");
@@ -129,8 +133,9 @@ export function stepGame(state, dtMs) {
 
   objects = objects.filter((object) => object.z >= -8);
   const cruiseSpeed = boosting ? speed / 1.45 : speed;
-  const spawnInterval = Math.max(0.72, 1.25 - cruiseSpeed * 0.009) / (boosting ? 1.2 : 1);
-  let spawnClock = state.spawnClock + dtSeconds;
+  const spawnInterval = Math.max(0.72, 1.25 - cruiseSpeed * 0.009);
+  // Spawns are spaced by distance, so boosting brings obstacles and pickups faster.
+  let spawnClock = state.spawnClock + dtSeconds * (boosting ? 1.45 : 1);
   let nextId = state.nextId;
   if (spawnClock >= spawnInterval) {
     spawnClock -= spawnInterval;
